@@ -27,6 +27,7 @@ import org.wso2.carbon.identity.application.authentication.framework.config.mode
 import org.wso2.carbon.identity.application.authentication.framework.store.UserSessionStore;
 import org.wso2.carbon.identity.application.authentication.framework.util.FrameworkUtils;
 import org.wso2.carbon.identity.application.common.model.ClaimMapping;
+import org.wso2.carbon.identity.application.common.model.FederatedAuthenticatorConfig;
 import org.wso2.carbon.identity.application.common.model.IdentityProvider;
 import org.wso2.carbon.identity.claim.metadata.mgt.ClaimMetadataHandler;
 import org.wso2.carbon.identity.core.util.IdentityTenantUtil;
@@ -39,9 +40,13 @@ import org.wso2.carbon.identity.flow.execution.engine.model.FlowExecutionContext
 import org.wso2.carbon.identity.flow.execution.engine.model.FlowUser;
 import org.wso2.carbon.identity.flow.mgt.Constants.FlowTypes;
 import org.wso2.carbon.identity.user.profile.mgt.association.federation.FederatedAssociationManager;
+import org.wso2.carbon.identity.user.profile.mgt.association.federation.model.AssociatedIdentityProvider;
+import org.wso2.carbon.identity.user.profile.mgt.association.federation.model.FederatedAssociation;
 import org.wso2.carbon.identity.verification.incode.connector.internal.IncodeConnectorDataHolder;
+import org.wso2.carbon.idp.mgt.IdpManager;
 
 import java.util.Collections;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -56,6 +61,10 @@ import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertFalse;
 import static org.testng.Assert.assertTrue;
 import static org.testng.Assert.fail;
+import static org.wso2.carbon.identity.application.authenticator.oidc.OIDCAuthenticatorConstants.CLIENT_ID;
+import static org.wso2.carbon.identity.application.authenticator.oidc.OIDCAuthenticatorConstants.OAUTH2_AUTHZ_URL;
+import static org.wso2.carbon.identity.application.common.util.IdentityApplicationConstants.OAuth2.SCOPES;
+import static org.wso2.carbon.identity.flow.execution.engine.Constants.REDIRECT_URL;
 
 public class IncodeExecutorTest {
 
@@ -66,12 +75,15 @@ public class IncodeExecutorTest {
 
     private final IncodeExecutor executor = new IncodeExecutor();
     private FederatedAssociationManager associationManager;
+    private IdpManager idpManager;
 
     @BeforeMethod
     public void setUp() {
 
         associationManager = mock(FederatedAssociationManager.class);
+        idpManager = mock(IdpManager.class);
         IncodeConnectorDataHolder.setFederatedAssociationManager(associationManager);
+        IncodeConnectorDataHolder.setIdpManager(idpManager);
     }
 
     @Test
@@ -84,12 +96,14 @@ public class IncodeExecutorTest {
     @Test
     public void testRegistrationStepMetadata() {
 
-        assertEquals(executor.getSupportedFlowTypes(), Collections.singleton(FlowTypes.REGISTRATION));
+        assertEquals(executor.getSupportedFlowTypes(), EnumSet.of(FlowTypes.REGISTRATION,
+                FlowTypes.INVITED_USER_REGISTRATION, FlowTypes.PASSWORD_RECOVERY));
         FlowExecutorMetadata metadata = executor.getExecutorMetadata();
         assertEquals(metadata.getDisplayName(), "Incode");
         assertEquals(metadata.getAssociatedAuthenticator(), "IncodeAuthenticator");
         assertEquals(metadata.getIcon(), "assets/images/icons/incode.svg");
         assertTrue(metadata.isConnectionRequired());
+        assertTrue(metadata.isExternalClaimResolutionEnabled());
     }
 
     @Test
@@ -191,7 +205,7 @@ public class IncodeExecutorTest {
     @Test
     public void testConnectionWithoutTheTemplateSettingsIsRefused() {
 
-        // Without IsLoginClaimResolutionEnabled the stock executor links sub, the per-session interview id.
+        // Without isExternalClaimResolutionEnabled on the step, the stock executor links sub (the interview id).
         assertLinkRefused(() -> resolveLocalClaims(context(Collections.emptyMap())));
     }
 
@@ -212,6 +226,53 @@ public class IncodeExecutorTest {
     }
 
     @Test
+    public void testInvitedUserKeepsTheirUsername() {
+
+        FlowExecutionContext context = context(Collections.emptyMap());
+        context.setFlowType(FlowTypes.INVITED_USER_REGISTRATION.getType());
+        Map<String, Object> claims = new HashMap<>();
+        claims.put(USERNAME_CLAIM, IDENTITY_ID);
+        executor.keepEarlierUsername(context, claims);
+        assertFalse(claims.containsKey(USERNAME_CLAIM));
+    }
+
+    @Test
+    public void testPasswordRecoveryAsksIncodeForTheLinkedIdentity() throws Exception {
+
+        linkUserTo(IDENTITY_ID);
+        ExecutorResponse response = executor.execute(recoveryContext());
+
+        assertEquals(response.getResult(), "EXTERNAL_REDIRECTION");
+        String redirect = response.getAdditionalInfo().get(REDIRECT_URL);
+        assertTrue(redirect.contains("login_hint=" + IDENTITY_ID), redirect);
+        assertTrue(redirect.contains("prompt=login"), redirect);
+    }
+
+    @Test
+    public void testPasswordRecoveryDoesNotRevealAMissingLink() throws Exception {
+
+        when(associationManager.getFederatedAssociationsOfUser(any())).thenReturn(new FederatedAssociation[0]);
+        ExecutorResponse response = executor.execute(recoveryContext());
+
+        assertEquals(response.getResult(), "USER_ERROR");
+        assertEquals(response.getErrorCode(), "INCODE-60005");
+        assertEquals(response.getErrorMessage(), "{{incode.identity.verification.not.completed.message}}");
+    }
+
+    @Test
+    public void testPasswordRecoveryAcceptsOnlyTheLinkedIdentity() throws Exception {
+
+        linkUserTo(IDENTITY_ID);
+        FlowExecutionContext context = recoveryContext();
+
+        assertTrue(executor.resolveLocalClaims(context, Collections.emptyMap(), idToken(IDENTITY_ID, "PASS"))
+                .isEmpty(), "Recovery leaves the profile unchanged.");
+        assertTrue(context.getFlowUser().getFederatedAssociations().isEmpty(), "Recovery leaves the link unchanged.");
+        assertRecoveryError(context, idToken("another-identity-id", "PASS"), "INCODE-60008");
+        assertRecoveryError(context, idToken(IDENTITY_ID, "FAIL"), "INCODE-60003");
+    }
+
+    @Test
     public void testUsernameChosenEarlierInTheFlowIsKept() {
 
         FlowExecutionContext context = context(Collections.emptyMap());
@@ -225,6 +286,53 @@ public class IncodeExecutorTest {
         executor.keepEarlierUsername(context, claims);
         assertFalse(claims.containsKey(USERNAME_CLAIM));
         assertFalse(context.getProperties().containsKey("isUsernamePatternValidationSkipped"));
+    }
+
+    private void assertRecoveryError(FlowExecutionContext context, Map<String, Object> idToken, String code) {
+
+        try {
+            executor.resolveLocalClaims(context, Collections.emptyMap(), idToken);
+            fail("Expected " + code);
+        } catch (FlowEngineException e) {
+            assertEquals(e.getErrorCode(), code);
+        }
+    }
+
+    /**
+     * Links the user to the given identity through an Incode connection.
+     */
+    private void linkUserTo(String identityId) throws Exception {
+
+        AssociatedIdentityProvider idp = mock(AssociatedIdentityProvider.class);
+        when(idp.getName()).thenReturn(CONNECTION);
+        FederatedAssociation association = mock(FederatedAssociation.class);
+        when(association.getIdp()).thenReturn(idp);
+        when(association.getFederatedUserId()).thenReturn(identityId);
+        when(associationManager.getFederatedAssociationsOfUser(any()))
+                .thenReturn(new FederatedAssociation[]{association});
+        FederatedAuthenticatorConfig authenticator = new FederatedAuthenticatorConfig();
+        authenticator.setName("IncodeAuthenticator");
+        IdentityProvider connection = new IdentityProvider();
+        connection.setDefaultAuthenticatorConfig(authenticator);
+        when(idpManager.getIdPByName(CONNECTION, TENANT)).thenReturn(connection);
+    }
+
+    /**
+     * A password recovery flow whose earlier step resolved the user alice.
+     */
+    private static FlowExecutionContext recoveryContext() {
+
+        FlowExecutionContext context = context(Collections.emptyMap());
+        context.setFlowType(FlowTypes.PASSWORD_RECOVERY.getType());
+        context.getFlowUser().setUsername("alice");
+        context.getFlowUser().setUserStoreDomain("PRIMARY");
+        context.setPortalUrl("https://localhost:9443/accounts/recovery");
+        Map<String, String> properties = new HashMap<>();
+        properties.put(CLIENT_ID, "face-client");
+        properties.put(OAUTH2_AUTHZ_URL, "https://incode.example/oauth2/authorize");
+        properties.put(SCOPES, "openid");
+        context.setAuthenticatorProperties(properties);
+        return context;
     }
 
     private void assertOnboardingError(FlowExecutionContext context, Map<String, Object> idToken, String code,

@@ -31,6 +31,7 @@ import org.wso2.carbon.identity.application.authenticator.oidc.OpenIDConnectAuth
 import org.wso2.carbon.identity.application.common.model.ClaimMapping;
 import org.wso2.carbon.identity.application.common.model.FederatedAuthenticatorConfig;
 import org.wso2.carbon.identity.application.common.model.IdentityProvider;
+import org.wso2.carbon.identity.application.common.model.User;
 import org.wso2.carbon.identity.user.profile.mgt.association.federation.exception.FederatedAssociationManagerException;
 import org.wso2.carbon.identity.user.profile.mgt.association.federation.model.FederatedAssociation;
 import org.wso2.carbon.identity.verification.incode.connector.constants.IncodeConstants;
@@ -185,7 +186,7 @@ public class IncodeAuthenticator extends OpenIDConnectAuthenticator {
      * The user's link to an identity made by an Incode connection. Sign-up links the user through the onboarding
      * connection, so the link is found by the connection's authenticator, not by this connection's name.
      */
-    private static String getLinkedIdentity(AuthenticatedUser user)
+    static String getLinkedIdentity(User user)
             throws FederatedAssociationManagerException, IdentityProviderManagementException {
 
         for (FederatedAssociation association :

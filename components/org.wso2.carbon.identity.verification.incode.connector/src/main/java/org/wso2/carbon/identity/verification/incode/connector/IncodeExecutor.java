@@ -23,6 +23,7 @@ import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.wso2.carbon.identity.application.authenticator.oidc.OpenIDConnectExecutor;
 import org.wso2.carbon.identity.application.common.model.ClaimMapping;
+import org.wso2.carbon.identity.application.common.model.User;
 import org.wso2.carbon.identity.flow.execution.engine.exception.FlowEngineClientException;
 import org.wso2.carbon.identity.flow.execution.engine.exception.FlowEngineException;
 import org.wso2.carbon.identity.flow.execution.engine.exception.FlowEngineServerException;
@@ -35,10 +36,12 @@ import org.wso2.carbon.identity.verification.incode.connector.constants.IncodeCo
 import org.wso2.carbon.identity.verification.incode.connector.constants.IncodeErrorConstants;
 import org.wso2.carbon.identity.verification.incode.connector.constants.IncodeErrorConstants.ErrorMessage;
 import org.wso2.carbon.identity.verification.incode.connector.internal.IncodeConnectorDataHolder;
+import org.wso2.carbon.idp.mgt.IdentityProviderManagementException;
 import org.wso2.carbon.user.core.util.UserCoreUtil;
 
 import java.util.Collections;
 import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 
@@ -51,9 +54,10 @@ import static org.wso2.carbon.identity.flow.execution.engine.Constants.ExecutorS
 import static org.wso2.carbon.identity.flow.execution.engine.Constants.USERNAME_CLAIM_URI;
 
 /**
- * Incode sign-up step for the registration flow. The OpenID Connect executor does the exchange and maps the claims;
- * this class checks the Incode result, refuses an identity that is already registered, links the user to the Incode
- * identity, keeps a username chosen earlier in the flow, and returns coded errors.
+ * Incode step for self-registration, invited-user registration and password recovery. The OpenID Connect executor
+ * does the exchange and maps the claims. In registration this class checks the Incode result, refuses an identity
+ * that is already registered, checks the link to the Incode identity and keeps the account's username; in password
+ * recovery it re-verifies the identity linked to the user. Errors carry Incode codes.
  */
 public class IncodeExecutor extends OpenIDConnectExecutor {
 
@@ -74,7 +78,7 @@ public class IncodeExecutor extends OpenIDConnectExecutor {
     @Override
     public Set<FlowTypes> getSupportedFlowTypes() {
 
-        return EnumSet.of(FlowTypes.REGISTRATION);
+        return EnumSet.of(FlowTypes.REGISTRATION, FlowTypes.INVITED_USER_REGISTRATION, FlowTypes.PASSWORD_RECOVERY);
     }
 
     @Override
@@ -86,6 +90,7 @@ public class IncodeExecutor extends OpenIDConnectExecutor {
                 .icon(IncodeConstants.ExecutorMetadata.ICON)
                 .associatedAuthenticator(IncodeConstants.AUTHENTICATOR_NAME)
                 .connectionRequired(true)
+                .externalClaimResolutionEnabled(true)
                 .build();
     }
 
@@ -106,7 +111,8 @@ public class IncodeExecutor extends OpenIDConnectExecutor {
         String code = inputs.get(OAUTH2_GRANT_TYPE_CODE);
         String state = inputs.get(OAUTH2_PARAM_STATE);
         if (code == null || state == null) {
-            return super.execute(context);
+            ExecutorResponse error = isPasswordRecovery(context) ? addLoginHint(context) : null;
+            return error != null ? error : super.execute(context);
         }
         Object expectedState = context.getProperty(OAUTH2_PARAM_STATE);
         if (expectedState == null || !state.equals(expectedState.toString())) {
@@ -131,6 +137,11 @@ public class IncodeExecutor extends OpenIDConnectExecutor {
                                                      Map<ClaimMapping, String> remoteClaimMappings,
                                                      Map<String, Object> idTokenClaims) throws FlowEngineException {
 
+        if (isPasswordRecovery(context)) {
+            verifyRecoveryIdentity(context, idTokenClaims);
+            // The step only gates the password reset: the profile and the link stay as they are.
+            return new HashMap<>();
+        }
         String identityId = verifyOnboarding(context, idTokenClaims);
         Map<String, Object> localClaims = super.resolveLocalClaims(context, remoteClaimMappings, idTokenClaims);
         verifyLinkedIdentity(context, identityId);
@@ -182,11 +193,96 @@ public class IncodeExecutor extends OpenIDConnectExecutor {
     }
 
     /**
-     * A username chosen earlier in the flow belongs to the account, so the step keeps it in any order.
+     * Password recovery re-verifies the account owner: sends the Incode identity linked to the user as login_hint
+     * with prompt=login. An account without a link gets the same error as a failed verification, so the step does
+     * not reveal whether the account is linked.
+     *
+     * @return the error that stops the step, or null.
+     */
+    ExecutorResponse addLoginHint(FlowExecutionContext context) {
+
+        String identityId;
+        try {
+            identityId = getLinkedIdentity(context);
+        } catch (FederatedAssociationManagerException | IdentityProviderManagementException e) {
+            LOG.error("Error reading the Incode identity linked to the user.", e);
+            return errorResponse(ErrorMessage.RESOLVING_ASSOCIATION);
+        }
+        if (identityId == null) {
+            LOG.info("Password recovery cannot verify the user: the account is not linked to an Incode identity.");
+            return errorResponse(ErrorMessage.VERIFICATION_NOT_COMPLETED);
+        }
+        context.getAuthenticatorProperties().put(IncodeConstants.EXPECTED_IDENTITY, identityId);
+        return null;
+    }
+
+    @Override
+    protected Map<String, String> getAdditionalQueryParams(Map<String, String> authenticatorProperties) {
+
+        Map<String, String> params = super.getAdditionalQueryParams(authenticatorProperties);
+        String identityId = authenticatorProperties.get(IncodeConstants.EXPECTED_IDENTITY);
+        if (identityId != null) {
+            params.put(IncodeConstants.PROMPT, IncodeConstants.PROMPT_LOGIN);
+            params.put(IncodeConstants.LOGIN_HINT, identityId);
+        }
+        return params;
+    }
+
+    /**
+     * In password recovery Incode must return the identity linked to the user, and a passing status when it sends
+     * one.
+     */
+    void verifyRecoveryIdentity(FlowExecutionContext context, Map<String, Object> idTokenClaims)
+            throws FlowEngineException {
+
+        String identityId;
+        try {
+            identityId = getLinkedIdentity(context);
+        } catch (FederatedAssociationManagerException | IdentityProviderManagementException e) {
+            LOG.error("Error reading the Incode identity linked to the user.", e);
+            throw flowException(ErrorMessage.RESOLVING_ASSOCIATION);
+        }
+        if (identityId == null || !identityId.equals(getClaim(idTokenClaims, IncodeConstants.IDENTITY_ID_CLAIM))) {
+            throw flowException(ErrorMessage.LOGIN_IDENTITY_MISMATCH);
+        }
+        String status = getClaim(idTokenClaims, IncodeConstants.STATUS_CLAIM);
+        if (status != null && !IncodeConstants.ACCEPTED_FACE_STATUSES.contains(status)) {
+            throw flowException(ErrorMessage.VERIFICATION_FAILED);
+        }
+    }
+
+    /**
+     * The Incode identity linked to the user of the flow, or null when the flow has no user or the user no link.
+     */
+    private static String getLinkedIdentity(FlowExecutionContext context)
+            throws FederatedAssociationManagerException, IdentityProviderManagementException {
+
+        String username = context.getFlowUser().getUsername();
+        if (StringUtils.isBlank(username)) {
+            return null;
+        }
+        String userStoreDomain = context.getFlowUser().getUserStoreDomain();
+        User user = new User();
+        user.setTenantDomain(context.getTenantDomain());
+        user.setUserStoreDomain(StringUtils.isNotBlank(userStoreDomain) ? userStoreDomain :
+                UserCoreUtil.extractDomainFromName(username));
+        user.setUserName(UserCoreUtil.removeDomainFromName(username));
+        return IncodeAuthenticator.getLinkedIdentity(user);
+    }
+
+    private static boolean isPasswordRecovery(FlowExecutionContext context) {
+
+        return FlowTypes.PASSWORD_RECOVERY.getType().equals(context.getFlowType());
+    }
+
+    /**
+     * The username chosen earlier in the flow, or the invited user's own, belongs to the account, so the step keeps
+     * it in any order.
      */
     void keepEarlierUsername(FlowExecutionContext context, Map<String, Object> localClaims) {
 
-        if (StringUtils.isNotBlank(context.getFlowUser().getClaims().get(USERNAME_CLAIM_URI))) {
+        if (FlowTypes.INVITED_USER_REGISTRATION.getType().equals(context.getFlowType())
+                || StringUtils.isNotBlank(context.getFlowUser().getClaims().get(USERNAME_CLAIM_URI))) {
             localClaims.remove(USERNAME_CLAIM_URI);
             context.getProperties().remove(IncodeConstants.USERNAME_PATTERN_VALIDATION_SKIPPED);
             UserCoreUtil.removeSkipUsernamePatternValidationThreadLocal();

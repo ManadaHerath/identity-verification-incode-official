@@ -54,7 +54,7 @@ public final class IncodeErrorConstants {
                 "incode.identity.verification.pending.review"),
         VERIFICATION_NOT_COMPLETED("60005",
                 "Identity verification could not be completed. Please try again.",
-                "Incode returned an error other than access_denied on the callback.",
+                "Incode returned an error other than access_denied, or the account cannot be verified.",
                 "incode.identity.verification.not.completed"),
         INVALID_STATE("60007",
                 "The verification response is invalid or has expired. Please start again.",
@@ -91,8 +91,9 @@ public final class IncodeErrorConstants {
                 "Error resolving the Incode identity association."),
         IDENTITY_NOT_LINKED_BY_CONNECTION("65011",
                 "The Incode connection is not configured correctly.",
-                "The connection did not link the account to the Incode identity_id. Create the connection from the "
-                        + "Incode Identity Verification template and map the OpenID Connect claim identity_id to "
+                "The connection did not link the account to the Incode identity_id. Save the flow again so that "
+                        + "the Incode step gets isExternalClaimResolutionEnabled, create the connection from the "
+                        + "Incode Identity Verification template, and map the OpenID Connect claim identity_id to "
                         + "http://wso2.org/claims/incodeIdentityId.");
 
         private final String code;

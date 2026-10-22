@@ -6,12 +6,16 @@ Server and adds only the Incode-specific checks.
 
 - **Self-registration**: an Incode step verifies the user (ID document and selfie). The account is created only for an
   accepted result, and it is linked to the verified Incode identity.
+- **Invited-user registration**: the invited user verifies with Incode before setting a password, and the account is
+  linked to the verified Incode identity.
 - **Login**: an Incode step after the step that identifies the user runs Incode face authentication for the identity
   linked to that user, and accepts only the same identity.
+- **Password recovery**: an Incode step after the step that identifies the user re-verifies the linked identity with
+  face authentication before the password can be reset.
 
 | Component | Name | Used in |
 |---|---|---|
-| Executor | `IncodeExecutor` (the **Incode** step in the flow builder) | Self-registration flow |
+| Executor | `IncodeExecutor` (the **Incode** step in the flow builder) | Self-registration, invited-user registration and password recovery flows |
 | Authenticator | `IncodeAuthenticator` (also the `amr` value) | Application login flows |
 | Connection template | `incode-idv` (**Incode Identity Verification**) | Connections |
 
@@ -27,8 +31,10 @@ association and trusts only that link.
    The OpenID Connect sign-up step then maps the Incode claims to the user's attributes and links the account to
    `identity_id`, the connection's subject attribute, the same way federated login resolves it. The Incode step
    refuses the sign-up if the account is linked to anything else.
-2. **Login**: the Incode step reads the link of the user identified by the earlier step, sends it to Incode as
-   `login_hint` with `prompt=login`, and accepts the step only if Incode returns the same `identity_id`.
+   Invited-user registration works the same way for the invited account, and keeps its username.
+2. **Login and password recovery**: the Incode step reads the link of the user identified by the earlier step, sends
+   it to Incode as `login_hint` with `prompt=login`, and accepts the step only if Incode returns the same
+   `identity_id`. Password recovery changes neither the profile nor the link.
 
 Users cannot create or change links. The profile attributes the connection fills in are for display only.
 
@@ -37,9 +43,11 @@ Users cannot create or change links. The profile attributes the connection fills
 ## Prerequisites
 
 - WSO2 Identity Server 7.x.
-- The OpenID Connect authenticator with support for the `IsLoginClaimResolutionEnabled` connection property
+- Platform versions with external claim resolution: the framework lets an executor declare it, the flow management
+  API sets `isExternalClaimResolutionEnabled` on the executor's steps when a flow is saved, and the OpenID Connect
+  sign-up step then honors the connection's external claim mappings
   ([identity-outbound-auth-oidc#243](https://github.com/wso2-extensions/identity-outbound-auth-oidc/pull/243)).
-  Without it, sign-up is refused with `INCODE-65011`.
+  Without them, sign-up is refused with `INCODE-65011`.
 - JDK 21 and Maven 3.6 or later.
 - An Incode environment where you can create OpenID Connect clients.
 
@@ -86,11 +94,12 @@ Create two confidential OpenID Connect clients in Incode:
 
 | Client | Purpose | Redirect URI |
 |---|---|---|
-| Onboarding | Verifies the user at sign-up. Its onboarding must create an identity, so that the ID token carries `identity_id` and `auth_overall_status`. | `https://<host>/accounts/register` |
-| Face authentication | Verifies the user at login, with the user's `identity_id` as `login_hint`. | `https://<host>/commonauth` |
+| Onboarding | Verifies the user at sign-up and invited-user registration. Its onboarding must create an identity, so that the ID token carries `identity_id` and `auth_overall_status`. | `https://<host>/accounts/register` |
+| Face authentication | Verifies the user at login and password recovery, with the user's `identity_id` as `login_hint`. | `https://<host>/commonauth` and `https://<host>/accounts/recovery` |
 
-For a tenant, add `/t/<tenant>` after the host. A custom portal URL in branding changes the `/accounts/register`
-value. See Incode's developer documentation for creating OpenID Connect clients.
+For a tenant, add `/t/<tenant>` after the host. Custom portal URLs in branding change the `/accounts/...` values:
+self-registration uses the sign-up portal URL, and invited-user registration and password recovery use the recovery
+portal URL. See Incode's developer documentation for creating OpenID Connect clients.
 
 ---
 
@@ -104,12 +113,20 @@ value. See Incode's developer documentation for creating OpenID Connect clients.
 2. **Connections** (Console > Connections > New Connection > **Incode Identity Verification**): create one connection
    per Incode client, for example "Incode Onboarding" and "Incode Face". The template maps `identity_id`,
    `interview_id` and `auth_overall_status` to the local attributes, sets `identity_id` as the subject attribute, and
-   sets the connection properties `IsLoginClaimResolutionEnabled` and `IsUserIdInClaims` to `true` (the console does
-   not show these two). Keep Just-in-Time provisioning off.
+   sets the connection property `IsUserIdInClaims` to `true` (the console does not show it). Keep Just-in-Time
+   provisioning off.
 3. **Self-registration** (Console > Flows > Self Registration): add the **Incode** step with the onboarding
    connection. It can come before or after the form that asks for the username and password; a username chosen in
    the form is kept.
-4. **Login** (the application's login flow): keep **Username & Password**, or another local first factor, as step 1
+4. **Invited-user registration** (Console > Flows): add the **Incode** step with the onboarding connection before the
+   step that sets the password.
+5. **External claim resolution**: when a flow with the Incode step is saved, the step gets
+   `isExternalClaimResolutionEnabled` set to `true` in its metadata, next to `idpName`. The connector declares it, so
+   nothing needs to be configured. With it, the OpenID Connect sign-up step honors the connection's external claim
+   mappings (the Incode attributes) and links the account to `identity_id`. Steps of other executors do not get it.
+6. **Password recovery** (Console > Flows): add the **Incode** step with the face authentication connection after the
+   step that identifies the user.
+7. **Login** (the application's login flow): keep **Username & Password**, or another local first factor, as step 1
    and as the subject identifier step, and add the face authentication connection as a later step. No adaptive script
    is needed.
 
@@ -125,6 +142,18 @@ value. See Incode's developer documentation for creating OpenID Connect clients.
 | Status `MANUAL`, `MANUAL_PENDING` or `WARN` | Refused, pending review (`INCODE-60004`) |
 | Any other status | Refused (`INCODE-60003`) |
 | `identity_id` already linked on the connection | Refused before the account is created (`INCODE-60009`) |
+| User cancelled at Incode | Refused (`INCODE-60002`) |
+
+**Invited-user registration**: the same results as sign-up; on success the invited account is linked to
+`identity_id` and gets the Incode attributes.
+
+**Password recovery**
+
+| Situation | Outcome |
+|---|---|
+| Returned `identity_id` matches the link, status `PASS` or `OK` (when present) | Step succeeds; the password can be reset |
+| The account has no Incode link | Refused with the generic `INCODE-60005`, before Incode is called |
+| Another identity returned, or a failing status | Refused (`INCODE-60008`, `60003`) |
 | User cancelled at Incode | Refused (`INCODE-60002`) |
 
 **Login**
@@ -148,7 +177,7 @@ Client errors are `INCODE-60xxx`, server and configuration errors `INCODE-65xxx`
 | 60002 | Verification cancelled | `cancelled` |
 | 60003 | Verification failed | `failed` |
 | 60004 | Verification needs a manual review | `pending.review` |
-| 60005 | Incode returned another error | `not.completed` |
+| 60005 | The verification could not be completed: Incode returned another error, or (password recovery) the account has no Incode link | `not.completed` |
 | 60007 | The verification response is invalid or expired | `session.expired` |
 | 60008 | The verified identity does not match the account | `login.identity.mismatch` |
 | 60009 | The identity is already registered | `already.linked` |
@@ -174,9 +203,10 @@ Client errors are `INCODE-60xxx`, server and configuration errors `INCODE-65xxx`
 ## Limitations
 
 - App-native (API-based) authentication is not supported by the login step.
-- Password recovery and invited-user registration flows are not supported.
 - The duplicate check covers the onboarding connection that runs the step; use one onboarding connection per
   organization.
+- In password recovery, an account without an Incode link is refused before Incode is called, while a linked account
+  is redirected to Incode, so a user who passes the earlier step can tell whether the account is linked.
 
 ---
 
@@ -185,7 +215,7 @@ Client errors are `INCODE-60xxx`, server and configuration errors `INCODE-65xxx`
 | Symptom | Cause |
 |---|---|
 | The Incode step is missing in the flow builder | The bundle is not active: check `wso2carbon.log` for `IncodeConnectorServiceComponent` |
-| Sign-up fails with `INCODE-65011` | The OpenID Connect attribute `identity_id` is missing, or the OpenID Connect authenticator does not support `IsLoginClaimResolutionEnabled` |
+| Sign-up fails with `INCODE-65011` | The flow was saved before the connector was deployed (save it again), the OpenID Connect attribute `identity_id` is missing, or the platform does not support the step metadata |
 | Sign-up fails with `INCODE-65009` | The onboarding client does not create an identity |
 | Login fails with `INCODE-60001` | The user signed up without the Incode step, or the link was removed |
 | Incode rejects the `login_hint` | The face authentication client is not configured for the identity id as login hint |
