@@ -91,7 +91,7 @@ public class IncodeAuthenticatorTest {
                 association(ONBOARDING_CONNECTION, IDENTITY_ID)};
         when(associationManager.getFederatedAssociationsOfUser(any())).thenReturn(associations);
 
-        assertNull(authenticator.addLoginHint(context));
+        assertNull(authenticator.addLinkedIdentityAsLoginHint(context));
         assertEquals(context.getAuthenticatorProperties().get(FrameworkConstants.QUERY_PARAMS),
                 "prompt=login&login_hint=" + IDENTITY_ID);
         assertEquals(context.getProperty("incodeExpectedIdentity"), IDENTITY_ID);
@@ -106,18 +106,18 @@ public class IncodeAuthenticatorTest {
         FederatedAssociation[] associations = {association(ONBOARDING_CONNECTION, IDENTITY_ID)};
         when(associationManager.getFederatedAssociationsOfUser(any())).thenReturn(associations);
 
-        assertNull(authenticator.addLoginHint(context(user, false)));
+        assertNull(authenticator.addLinkedIdentityAsLoginHint(context(user, false)));
     }
 
     @Test
-    public void testFaceCheckParamsReplaceConfiguredPromptAndLoginHint() {
+    public void testQueryStringWithLoginHintReplacesConfiguredPromptAndLoginHint() {
 
-        assertEquals(IncodeAuthenticator.withFaceCheckParams(
+        assertEquals(IncodeAuthenticator.getQueryStringWithLoginHint(
                         "response_mode=form_post&login_hint=someone-else&prompt=none", IDENTITY_ID),
                 "response_mode=form_post&prompt=login&login_hint=" + IDENTITY_ID);
-        assertEquals(IncodeAuthenticator.withFaceCheckParams(null, IDENTITY_ID),
+        assertEquals(IncodeAuthenticator.getQueryStringWithLoginHint(null, IDENTITY_ID),
                 "prompt=login&login_hint=" + IDENTITY_ID);
-        assertEquals(IncodeAuthenticator.withFaceCheckParams("", "a&b=c"), "prompt=login&login_hint=a%26b%3Dc");
+        assertEquals(IncodeAuthenticator.getQueryStringWithLoginHint("", "a&b=c"), "prompt=login&login_hint=a%26b%3Dc");
     }
 
     @Test
@@ -126,17 +126,20 @@ public class IncodeAuthenticatorTest {
         FederatedAssociation[] associations = {association("Google", "google-subject")};
         when(associationManager.getFederatedAssociationsOfUser(any())).thenReturn(associations);
 
-        assertEquals(authenticator.addLoginHint(context(localUser(), false)), ErrorMessage.IDENTITY_NOT_LINKED);
+        assertEquals(authenticator.addLinkedIdentityAsLoginHint(context(localUser(), false)),
+                ErrorMessage.IDENTITY_NOT_LINKED);
     }
 
     @Test
     public void testTheSubjectStepMustBeAnEarlierStepWithALocalUser() {
 
-        assertEquals(authenticator.addLoginHint(context(localUser(), true)), ErrorMessage.INVALID_CONFIGURATION);
-        assertEquals(authenticator.addLoginHint(context(null, false)), ErrorMessage.NO_LOCAL_USER);
+        assertEquals(authenticator.addLinkedIdentityAsLoginHint(context(localUser(), true)),
+                ErrorMessage.INVALID_CONFIGURATION);
+        assertEquals(authenticator.addLinkedIdentityAsLoginHint(context(null, false)), ErrorMessage.NO_LOCAL_USER);
         AuthenticatedUser federatedUser = localUser();
         federatedUser.setFederatedUser(true);
-        assertEquals(authenticator.addLoginHint(context(federatedUser, false)), ErrorMessage.NO_LOCAL_USER);
+        assertEquals(authenticator.addLinkedIdentityAsLoginHint(context(federatedUser, false)),
+                ErrorMessage.NO_LOCAL_USER);
     }
 
     @Test
@@ -168,15 +171,17 @@ public class IncodeAuthenticatorTest {
 
         Map<ClaimMapping, String> claims = new HashMap<>();
         claims.put(ClaimMapping.build("identity_id", "identity_id", null, false), IDENTITY_ID);
-        assertNull(IncodeAuthenticator.verifyIdentity(claims, IDENTITY_ID));
-        assertEquals(IncodeAuthenticator.verifyIdentity(claims, "another-identity"),
+        assertNull(IncodeAuthenticator.validateFaceAuthenticationResult(claims, IDENTITY_ID));
+        assertEquals(IncodeAuthenticator.validateFaceAuthenticationResult(claims, "another-identity"),
                 ErrorMessage.LOGIN_IDENTITY_MISMATCH);
-        assertEquals(IncodeAuthenticator.verifyIdentity(claims, null), ErrorMessage.LOGIN_IDENTITY_MISMATCH);
+        assertEquals(IncodeAuthenticator.validateFaceAuthenticationResult(claims, null),
+                ErrorMessage.LOGIN_IDENTITY_MISMATCH);
 
         claims.put(ClaimMapping.build("auth_overall_status", "auth_overall_status", null, false), "PASS");
-        assertNull(IncodeAuthenticator.verifyIdentity(claims, IDENTITY_ID));
+        assertNull(IncodeAuthenticator.validateFaceAuthenticationResult(claims, IDENTITY_ID));
         claims.put(ClaimMapping.build("auth_overall_status", "auth_overall_status", null, false), "FAIL");
-        assertEquals(IncodeAuthenticator.verifyIdentity(claims, IDENTITY_ID), ErrorMessage.VERIFICATION_FAILED);
+        assertEquals(IncodeAuthenticator.validateFaceAuthenticationResult(claims, IDENTITY_ID),
+                ErrorMessage.VERIFICATION_FAILED);
     }
 
     private void assertCallbackError(String oauthError, String expectedCode) {

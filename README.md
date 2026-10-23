@@ -75,7 +75,8 @@ are read at startup):
 |---|---|
 | `dropins/` (connector bundle) | `repository/components/dropins/` |
 | `connections/incode-idv/` (connection template) | `repository/resources/identity/extensions/connections/` |
-| `images/incode.svg` (logo) | `console/resources/connections/assets/images/logos/`, `console/resources/assets/images/icons/`, `myaccount/resources/connections/assets/images/logos/` and `authenticationendpoint/libs/themes/default/assets/images/identity-providers/`, under `repository/deployment/server/webapps/` |
+| `images/logos/incode.svg` (logo) | `console/resources/connections/assets/images/logos/`, `myaccount/resources/connections/assets/images/logos/` and `authenticationendpoint/libs/themes/default/assets/images/identity-providers/`, under `repository/deployment/server/webapps/` |
+| `images/icons/incode.svg` (square icon of the **Incode** step in the flow builder) | `console/resources/assets/images/icons/`, under `repository/deployment/server/webapps/` |
 
 ---
 

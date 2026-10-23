@@ -83,7 +83,7 @@ public class IncodeAuthenticator extends OpenIDConnectAuthenticator {
                                                  AuthenticationContext context)
             throws AuthenticationFailedException {
 
-        ErrorMessage error = addLoginHint(context);
+        ErrorMessage error = addLinkedIdentityAsLoginHint(context);
         if (error != null) {
             sendToRetryPage(request, response, context, error);
             return;
@@ -100,13 +100,14 @@ public class IncodeAuthenticator extends OpenIDConnectAuthenticator {
         context.removeProperty(Constants.EXPECTED_IDENTITY);
         String oauthError = request.getParameter(OAUTH2_ERROR);
         if (StringUtils.isNotBlank(oauthError)) {
-            throw failCallback(context, Constants.ACCESS_DENIED.equals(oauthError) ?
+            throw handleAuthenticationFailedException(context, Constants.ACCESS_DENIED.equals(oauthError) ?
                     ErrorMessage.VERIFICATION_CANCELLED : ErrorMessage.VERIFICATION_NOT_COMPLETED);
         }
         super.processAuthenticationResponse(request, response, context);
-        ErrorMessage error = verifyIdentity(context.getSubject().getUserAttributes(), expectedIdentity);
+        ErrorMessage error = validateFaceAuthenticationResult(context.getSubject().getUserAttributes(),
+                expectedIdentity);
         if (error != null) {
-            throw failCallback(context, error);
+            throw handleAuthenticationFailedException(context, error);
         }
     }
 
@@ -115,7 +116,7 @@ public class IncodeAuthenticator extends OpenIDConnectAuthenticator {
      *
      * @return the error that fails the step, or null.
      */
-    static ErrorMessage verifyIdentity(Map<ClaimMapping, String> claims, Object expectedIdentity) {
+    static ErrorMessage validateFaceAuthenticationResult(Map<ClaimMapping, String> claims, Object expectedIdentity) {
 
         if (expectedIdentity == null
                 || !expectedIdentity.equals(getRemoteClaim(claims, Constants.IDENTITY_ID_CLAIM))) {
@@ -132,7 +133,7 @@ public class IncodeAuthenticator extends OpenIDConnectAuthenticator {
      *
      * @return the error that stops the request, or null.
      */
-    ErrorMessage addLoginHint(AuthenticationContext context) {
+    ErrorMessage addLinkedIdentityAsLoginHint(AuthenticationContext context) {
 
         Map<Integer, StepConfig> steps = context.getSequenceConfig().getStepMap();
         StepConfig subjectStep = steps.values().stream().filter(StepConfig::isSubjectIdentifierStep).findFirst()
@@ -155,7 +156,7 @@ public class IncodeAuthenticator extends OpenIDConnectAuthenticator {
             return ErrorMessage.IDENTITY_NOT_LINKED;
         }
         Map<String, String> properties = context.getAuthenticatorProperties();
-        properties.put(FrameworkConstants.QUERY_PARAMS, withFaceCheckParams(
+        properties.put(FrameworkConstants.QUERY_PARAMS, getQueryStringWithLoginHint(
                 properties.get(FrameworkConstants.QUERY_PARAMS), identityId));
         context.setProperty(Constants.EXPECTED_IDENTITY, identityId);
         return null;
@@ -165,7 +166,7 @@ public class IncodeAuthenticator extends OpenIDConnectAuthenticator {
      * Makes Incode run a new face check for the linked identity: sets prompt=login and login_hint, replacing any
      * values the connection's query parameters carry.
      */
-    static String withFaceCheckParams(String queryParams, String identityId) {
+    static String getQueryStringWithLoginHint(String queryParams, String identityId) {
 
         List<String> params = new ArrayList<>();
         if (StringUtils.isNotBlank(queryParams)) {
@@ -223,7 +224,8 @@ public class IncodeAuthenticator extends OpenIDConnectAuthenticator {
         }
     }
 
-    private AuthenticationFailedException failCallback(AuthenticationContext context, ErrorMessage error) {
+    private AuthenticationFailedException handleAuthenticationFailedException(AuthenticationContext context,
+                                                                              ErrorMessage error) {
 
         setErrorInformation(context, error);
         return new AuthenticationFailedException(error.getCode(), error.getMessage());

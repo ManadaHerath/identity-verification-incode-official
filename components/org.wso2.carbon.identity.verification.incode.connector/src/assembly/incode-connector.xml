@@ -27,10 +27,6 @@
             <source>${project.build.directory}/${project.build.finalName}.jar</source>
             <outputDirectory>wso2is-incode-connector-${project.version}/dropins/</outputDirectory>
         </file>
-        <file>
-            <source>resources/images/incode.svg</source>
-            <outputDirectory>wso2is-incode-connector-${project.version}/images/</outputDirectory>
-        </file>
     </files>
     <fileSets>
         <fileSet>
@@ -39,6 +35,10 @@
             <includes>
                 <include>incode-idv/**</include>
             </includes>
+        </fileSet>
+        <fileSet>
+            <directory>resources/images</directory>
+            <outputDirectory>wso2is-incode-connector-${project.version}/images/</outputDirectory>
         </fileSet>
     </fileSets>
 </assembly>

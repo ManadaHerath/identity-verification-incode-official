@@ -179,8 +179,8 @@ public class IncodeExecutorTest {
     public void testOnlyAPassingNewIdentityCanSignUp() throws Exception {
 
         FlowExecutionContext context = context(Collections.emptyMap());
-        assertEquals(executor.verifyOnboarding(context, idToken(IDENTITY_ID, "PASS")), IDENTITY_ID);
-        assertEquals(executor.verifyOnboarding(context, idToken(IDENTITY_ID, "MANUAL_OK")), IDENTITY_ID);
+        assertEquals(executor.validateOnboardingResult(context, idToken(IDENTITY_ID, "PASS")), IDENTITY_ID);
+        assertEquals(executor.validateOnboardingResult(context, idToken(IDENTITY_ID, "MANUAL_OK")), IDENTITY_ID);
         assertOnboardingError(context, idToken(IDENTITY_ID, "MANUAL"), "INCODE-60004", true);
         assertOnboardingError(context, idToken(IDENTITY_ID, "FAIL"), "INCODE-60003", true);
         assertOnboardingError(context, idToken(null, "PASS"), "INCODE-65009", false);
@@ -195,11 +195,11 @@ public class IncodeExecutorTest {
 
         FlowExecutionContext context = context(Collections.emptyMap());
         context.getFlowUser().addFederatedAssociation(CONNECTION, IDENTITY_ID);
-        executor.verifyLinkedIdentity(context, IDENTITY_ID);
+        executor.validateFederatedAssociation(context, IDENTITY_ID);
 
         context.getFlowUser().addFederatedAssociation(CONNECTION, "interview-id");
-        assertLinkRefused(() -> executor.verifyLinkedIdentity(context, IDENTITY_ID));
-        assertLinkRefused(() -> executor.verifyLinkedIdentity(context(Collections.emptyMap()), IDENTITY_ID));
+        assertLinkRefused(() -> executor.validateFederatedAssociation(context, IDENTITY_ID));
+        assertLinkRefused(() -> executor.validateFederatedAssociation(context(Collections.emptyMap()), IDENTITY_ID));
     }
 
     @Test
@@ -232,7 +232,7 @@ public class IncodeExecutorTest {
         context.setFlowType(FlowTypes.INVITED_USER_REGISTRATION.getType());
         Map<String, Object> claims = new HashMap<>();
         claims.put(USERNAME_CLAIM, IDENTITY_ID);
-        executor.keepEarlierUsername(context, claims);
+        executor.retainExistingUsername(context, claims);
         assertFalse(claims.containsKey(USERNAME_CLAIM));
     }
 
@@ -279,11 +279,11 @@ public class IncodeExecutorTest {
         context.setProperty("isUsernamePatternValidationSkipped", true);
         Map<String, Object> claims = new HashMap<>();
         claims.put(USERNAME_CLAIM, IDENTITY_ID);
-        executor.keepEarlierUsername(context, claims);
+        executor.retainExistingUsername(context, claims);
         assertEquals(claims.get(USERNAME_CLAIM), IDENTITY_ID, "Without an earlier username Incode proposes one.");
 
         context.getFlowUser().addUpdatedClaim(USERNAME_CLAIM, "alice");
-        executor.keepEarlierUsername(context, claims);
+        executor.retainExistingUsername(context, claims);
         assertFalse(claims.containsKey(USERNAME_CLAIM));
         assertFalse(context.getProperties().containsKey("isUsernamePatternValidationSkipped"));
     }
@@ -339,7 +339,7 @@ public class IncodeExecutorTest {
                                        boolean clientError) {
 
         try {
-            executor.verifyOnboarding(context, idToken);
+            executor.validateOnboardingResult(context, idToken);
             fail("Expected " + code);
         } catch (FlowEngineException e) {
             assertEquals(e.getErrorCode(), code);
