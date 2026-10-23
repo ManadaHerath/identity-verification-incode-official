@@ -34,7 +34,7 @@ import org.wso2.carbon.identity.application.common.model.IdentityProvider;
 import org.wso2.carbon.identity.user.profile.mgt.association.federation.FederatedAssociationManager;
 import org.wso2.carbon.identity.user.profile.mgt.association.federation.model.AssociatedIdentityProvider;
 import org.wso2.carbon.identity.user.profile.mgt.association.federation.model.FederatedAssociation;
-import org.wso2.carbon.identity.verification.incode.connector.constants.IncodeErrorConstants.ErrorMessage;
+import org.wso2.carbon.identity.verification.incode.connector.constants.ErrorConstants.ErrorMessage;
 import org.wso2.carbon.identity.verification.incode.connector.internal.IncodeConnectorDataHolder;
 import org.wso2.carbon.idp.mgt.IdpManager;
 

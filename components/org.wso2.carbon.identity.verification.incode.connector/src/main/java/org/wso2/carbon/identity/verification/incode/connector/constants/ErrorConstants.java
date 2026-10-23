@@ -21,11 +21,11 @@ package org.wso2.carbon.identity.verification.incode.connector.constants;
 /**
  * Error catalogue of the connector.
  */
-public final class IncodeErrorConstants {
+public final class ErrorConstants {
 
     public static final String INCODE_ERROR_PREFIX = "INCODE-";
 
-    private IncodeErrorConstants() {
+    private ErrorConstants() {
     }
 
     /**

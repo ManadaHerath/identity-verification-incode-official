@@ -28,11 +28,6 @@
             <outputDirectory>wso2is-incode-connector-${project.version}/dropins/</outputDirectory>
         </file>
         <file>
-            <source>src/assembly/setup_incode.sh</source>
-            <outputDirectory>wso2is-incode-connector-${project.version}/</outputDirectory>
-            <fileMode>0755</fileMode>
-        </file>
-        <file>
             <source>resources/images/incode.svg</source>
             <outputDirectory>wso2is-incode-connector-${project.version}/images/</outputDirectory>
         </file>

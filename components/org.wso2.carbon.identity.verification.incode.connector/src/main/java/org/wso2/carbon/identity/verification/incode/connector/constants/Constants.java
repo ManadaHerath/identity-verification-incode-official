@@ -25,7 +25,7 @@ import java.util.List;
 /**
  * Constants of the Incode connector.
  */
-public final class IncodeConstants {
+public final class Constants {
 
     public static final String AUTHENTICATOR_NAME = "IncodeAuthenticator";
     public static final String AUTHENTICATOR_FRIENDLY_NAME = "Incode";
@@ -49,7 +49,7 @@ public final class IncodeConstants {
     public static final String RETRY_PAGE_STATUS_KEY = "unable.to.proceed";
     public static final String USERNAME_PATTERN_VALIDATION_SKIPPED = "isUsernamePatternValidationSkipped";
 
-    private IncodeConstants() {
+    private Constants() {
     }
 
     /**

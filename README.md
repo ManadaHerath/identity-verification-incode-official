@@ -62,29 +62,20 @@ mvn clean install
 | Artifact | Location |
 |---|---|
 | Connector bundle (authenticator and executor) | `components/org.wso2.carbon.identity.verification.incode.connector/target/org.wso2.carbon.identity.verification.incode.connector-<version>.jar` |
-| Release archive (bundle, connection template, logo and setup script) | `components/org.wso2.carbon.identity.verification.incode.connector/target/wso2is-incode-connector-<version>.zip` |
+| Release archive (bundle, connection template and logo) | `components/org.wso2.carbon.identity.verification.incode.connector/target/wso2is-incode-connector-<version>.zip` |
 
 ---
 
 ## Deployment
 
-Extract the release archive inside `<IS_HOME>`, run the setup script from the extracted directory, and restart the
-server (connection templates are read at startup):
+Extract the release archive and copy its contents into `<IS_HOME>`, then restart the server (connection templates
+are read at startup):
 
-```bash
-unzip wso2is-incode-connector-*.zip -d $IS_HOME
-cd $IS_HOME/wso2is-incode-connector-*
-./setup_incode.sh
-$IS_HOME/bin/wso2server.sh restart
-```
-
-The script copies:
-
-| Artifact | Destination, under `<IS_HOME>` |
+| Artifact in the archive | Destination, under `<IS_HOME>` |
 |---|---|
-| Connector bundle | `repository/components/dropins/` |
-| Connection template `incode-idv` | `repository/resources/identity/extensions/connections/` |
-| Logo `incode.svg` | `console/resources/connections/assets/images/logos/`, `console/resources/assets/images/icons/`, `myaccount/resources/connections/assets/images/logos/` and `authenticationendpoint/libs/themes/default/assets/images/identity-providers/`, under `repository/deployment/server/webapps/` |
+| `dropins/` (connector bundle) | `repository/components/dropins/` |
+| `connections/incode-idv/` (connection template) | `repository/resources/identity/extensions/connections/` |
+| `images/incode.svg` (logo) | `console/resources/connections/assets/images/logos/`, `console/resources/assets/images/icons/`, `myaccount/resources/connections/assets/images/logos/` and `authenticationendpoint/libs/themes/default/assets/images/identity-providers/`, under `repository/deployment/server/webapps/` |
 
 ---
 

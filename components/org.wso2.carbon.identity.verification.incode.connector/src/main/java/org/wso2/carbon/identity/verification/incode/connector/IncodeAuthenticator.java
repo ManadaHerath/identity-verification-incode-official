@@ -34,8 +34,8 @@ import org.wso2.carbon.identity.application.common.model.IdentityProvider;
 import org.wso2.carbon.identity.application.common.model.User;
 import org.wso2.carbon.identity.user.profile.mgt.association.federation.exception.FederatedAssociationManagerException;
 import org.wso2.carbon.identity.user.profile.mgt.association.federation.model.FederatedAssociation;
-import org.wso2.carbon.identity.verification.incode.connector.constants.IncodeConstants;
-import org.wso2.carbon.identity.verification.incode.connector.constants.IncodeErrorConstants.ErrorMessage;
+import org.wso2.carbon.identity.verification.incode.connector.constants.Constants;
+import org.wso2.carbon.identity.verification.incode.connector.constants.ErrorConstants.ErrorMessage;
 import org.wso2.carbon.identity.verification.incode.connector.internal.IncodeConnectorDataHolder;
 import org.wso2.carbon.idp.mgt.IdentityProviderManagementException;
 
@@ -63,13 +63,13 @@ public class IncodeAuthenticator extends OpenIDConnectAuthenticator {
     @Override
     public String getName() {
 
-        return IncodeConstants.AUTHENTICATOR_NAME;
+        return Constants.AUTHENTICATOR_NAME;
     }
 
     @Override
     public String getFriendlyName() {
 
-        return IncodeConstants.AUTHENTICATOR_FRIENDLY_NAME;
+        return Constants.AUTHENTICATOR_FRIENDLY_NAME;
     }
 
     @Override
@@ -96,11 +96,11 @@ public class IncodeAuthenticator extends OpenIDConnectAuthenticator {
                                                  AuthenticationContext context)
             throws AuthenticationFailedException {
 
-        Object expectedIdentity = context.getProperty(IncodeConstants.EXPECTED_IDENTITY);
-        context.removeProperty(IncodeConstants.EXPECTED_IDENTITY);
+        Object expectedIdentity = context.getProperty(Constants.EXPECTED_IDENTITY);
+        context.removeProperty(Constants.EXPECTED_IDENTITY);
         String oauthError = request.getParameter(OAUTH2_ERROR);
         if (StringUtils.isNotBlank(oauthError)) {
-            throw failCallback(context, IncodeConstants.ACCESS_DENIED.equals(oauthError) ?
+            throw failCallback(context, Constants.ACCESS_DENIED.equals(oauthError) ?
                     ErrorMessage.VERIFICATION_CANCELLED : ErrorMessage.VERIFICATION_NOT_COMPLETED);
         }
         super.processAuthenticationResponse(request, response, context);
@@ -118,11 +118,11 @@ public class IncodeAuthenticator extends OpenIDConnectAuthenticator {
     static ErrorMessage verifyIdentity(Map<ClaimMapping, String> claims, Object expectedIdentity) {
 
         if (expectedIdentity == null
-                || !expectedIdentity.equals(getRemoteClaim(claims, IncodeConstants.IDENTITY_ID_CLAIM))) {
+                || !expectedIdentity.equals(getRemoteClaim(claims, Constants.IDENTITY_ID_CLAIM))) {
             return ErrorMessage.LOGIN_IDENTITY_MISMATCH;
         }
-        String status = getRemoteClaim(claims, IncodeConstants.STATUS_CLAIM);
-        return status == null || IncodeConstants.ACCEPTED_FACE_STATUSES.contains(status) ? null :
+        String status = getRemoteClaim(claims, Constants.STATUS_CLAIM);
+        return status == null || Constants.ACCEPTED_FACE_STATUSES.contains(status) ? null :
                 ErrorMessage.VERIFICATION_FAILED;
     }
 
@@ -157,7 +157,7 @@ public class IncodeAuthenticator extends OpenIDConnectAuthenticator {
         Map<String, String> properties = context.getAuthenticatorProperties();
         properties.put(FrameworkConstants.QUERY_PARAMS, withFaceCheckParams(
                 properties.get(FrameworkConstants.QUERY_PARAMS), identityId));
-        context.setProperty(IncodeConstants.EXPECTED_IDENTITY, identityId);
+        context.setProperty(Constants.EXPECTED_IDENTITY, identityId);
         return null;
     }
 
@@ -171,14 +171,14 @@ public class IncodeAuthenticator extends OpenIDConnectAuthenticator {
         if (StringUtils.isNotBlank(queryParams)) {
             for (String param : queryParams.split("&")) {
                 String name = param.split("=", 2)[0];
-                if (StringUtils.isNotBlank(param) && !IncodeConstants.PROMPT.equals(name)
-                        && !IncodeConstants.LOGIN_HINT.equals(name)) {
+                if (StringUtils.isNotBlank(param) && !Constants.PROMPT.equals(name)
+                        && !Constants.LOGIN_HINT.equals(name)) {
                     params.add(param);
                 }
             }
         }
-        params.add(IncodeConstants.PROMPT + "=" + IncodeConstants.PROMPT_LOGIN);
-        params.add(IncodeConstants.LOGIN_HINT + "=" + URLEncoder.encode(identityId, StandardCharsets.UTF_8));
+        params.add(Constants.PROMPT + "=" + Constants.PROMPT_LOGIN);
+        params.add(Constants.LOGIN_HINT + "=" + URLEncoder.encode(identityId, StandardCharsets.UTF_8));
         return String.join("&", params);
     }
 
@@ -194,7 +194,7 @@ public class IncodeAuthenticator extends OpenIDConnectAuthenticator {
             IdentityProvider idp = IncodeConnectorDataHolder.getIdpManager()
                     .getIdPByName(association.getIdp().getName(), user.getTenantDomain());
             FederatedAuthenticatorConfig authenticator = idp == null ? null : idp.getDefaultAuthenticatorConfig();
-            if (authenticator != null && IncodeConstants.AUTHENTICATOR_NAME.equals(authenticator.getName())) {
+            if (authenticator != null && Constants.AUTHENTICATOR_NAME.equals(authenticator.getName())) {
                 return association.getFederatedUserId();
             }
         }
@@ -215,7 +215,7 @@ public class IncodeAuthenticator extends OpenIDConnectAuthenticator {
         setErrorInformation(context, error);
         try {
             FrameworkUtils.sendToRetryPage(request, response, context,
-                    error.getI18nKey() == null ? IncodeConstants.RETRY_PAGE_STATUS_KEY :
+                    error.getI18nKey() == null ? Constants.RETRY_PAGE_STATUS_KEY :
                             error.getUserMessageToken(), error.getUserDescriptionToken());
             context.setCurrentAuthenticator(getName());
         } catch (IOException e) {

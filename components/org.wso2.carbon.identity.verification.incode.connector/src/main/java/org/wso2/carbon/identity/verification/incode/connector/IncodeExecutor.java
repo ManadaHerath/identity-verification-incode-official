@@ -32,9 +32,9 @@ import org.wso2.carbon.identity.flow.execution.engine.model.ExecutorResponse;
 import org.wso2.carbon.identity.flow.execution.engine.model.FlowExecutionContext;
 import org.wso2.carbon.identity.flow.mgt.Constants.FlowTypes;
 import org.wso2.carbon.identity.user.profile.mgt.association.federation.exception.FederatedAssociationManagerException;
-import org.wso2.carbon.identity.verification.incode.connector.constants.IncodeConstants;
-import org.wso2.carbon.identity.verification.incode.connector.constants.IncodeErrorConstants;
-import org.wso2.carbon.identity.verification.incode.connector.constants.IncodeErrorConstants.ErrorMessage;
+import org.wso2.carbon.identity.verification.incode.connector.constants.Constants;
+import org.wso2.carbon.identity.verification.incode.connector.constants.ErrorConstants;
+import org.wso2.carbon.identity.verification.incode.connector.constants.ErrorConstants.ErrorMessage;
 import org.wso2.carbon.identity.verification.incode.connector.internal.IncodeConnectorDataHolder;
 import org.wso2.carbon.idp.mgt.IdentityProviderManagementException;
 import org.wso2.carbon.user.core.util.UserCoreUtil;
@@ -66,13 +66,13 @@ public class IncodeExecutor extends OpenIDConnectExecutor {
     @Override
     public String getName() {
 
-        return IncodeConstants.EXECUTOR_NAME;
+        return Constants.EXECUTOR_NAME;
     }
 
     @Override
     public String getAMRValue() {
 
-        return IncodeConstants.AUTHENTICATOR_NAME;
+        return Constants.AUTHENTICATOR_NAME;
     }
 
     @Override
@@ -85,10 +85,10 @@ public class IncodeExecutor extends OpenIDConnectExecutor {
     public FlowExecutorMetadata getExecutorMetadata() {
 
         return FlowExecutorMetadata.builder()
-                .displayName(IncodeConstants.ExecutorMetadata.DISPLAY_NAME)
-                .description(IncodeConstants.ExecutorMetadata.DESCRIPTION)
-                .icon(IncodeConstants.ExecutorMetadata.ICON)
-                .associatedAuthenticator(IncodeConstants.AUTHENTICATOR_NAME)
+                .displayName(Constants.ExecutorMetadata.DISPLAY_NAME)
+                .description(Constants.ExecutorMetadata.DESCRIPTION)
+                .icon(Constants.ExecutorMetadata.ICON)
+                .associatedAuthenticator(Constants.AUTHENTICATOR_NAME)
                 .connectionRequired(true)
                 .externalClaimResolutionEnabled(true)
                 .build();
@@ -105,7 +105,7 @@ public class IncodeExecutor extends OpenIDConnectExecutor {
                 context.getUserInputData();
         String oauthError = inputs.get(OAUTH2_ERROR);
         if (StringUtils.isNotBlank(oauthError)) {
-            return errorResponse(IncodeConstants.ACCESS_DENIED.equals(oauthError) ?
+            return errorResponse(Constants.ACCESS_DENIED.equals(oauthError) ?
                     ErrorMessage.VERIFICATION_CANCELLED : ErrorMessage.VERIFICATION_NOT_COMPLETED);
         }
         String code = inputs.get(OAUTH2_GRANT_TYPE_CODE);
@@ -123,7 +123,7 @@ public class IncodeExecutor extends OpenIDConnectExecutor {
             response.setUpdatedUserClaims(resolveUserAttributes(context, code));
             return response;
         } catch (FlowEngineException e) {
-            if (StringUtils.startsWith(e.getErrorCode(), IncodeErrorConstants.INCODE_ERROR_PREFIX)) {
+            if (StringUtils.startsWith(e.getErrorCode(), ErrorConstants.INCODE_ERROR_PREFIX)) {
                 return errorResponse(e instanceof FlowEngineClientException ? STATUS_USER_ERROR : STATUS_ERROR,
                         e.getErrorCode(), e.getMessage(), e.getDescription());
             }
@@ -171,13 +171,13 @@ public class IncodeExecutor extends OpenIDConnectExecutor {
     String verifyOnboarding(FlowExecutionContext context, Map<String, Object> idTokenClaims)
             throws FlowEngineException {
 
-        String identityId = getClaim(idTokenClaims, IncodeConstants.IDENTITY_ID_CLAIM);
-        String status = getClaim(idTokenClaims, IncodeConstants.STATUS_CLAIM);
+        String identityId = getClaim(idTokenClaims, Constants.IDENTITY_ID_CLAIM);
+        String status = getClaim(idTokenClaims, Constants.STATUS_CLAIM);
         if (identityId == null || status == null) {
             throw flowException(ErrorMessage.SIGNUP_UNAVAILABLE);
         }
-        if (!IncodeConstants.ACCEPTED_ONBOARDING_STATUSES.contains(status)) {
-            throw flowException(IncodeConstants.PENDING_REVIEW_STATUSES.contains(status) ?
+        if (!Constants.ACCEPTED_ONBOARDING_STATUSES.contains(status)) {
+            throw flowException(Constants.PENDING_REVIEW_STATUSES.contains(status) ?
                     ErrorMessage.VERIFICATION_PENDING_REVIEW : ErrorMessage.VERIFICATION_FAILED);
         }
         try {
@@ -212,7 +212,7 @@ public class IncodeExecutor extends OpenIDConnectExecutor {
             LOG.info("Password recovery cannot verify the user: the account is not linked to an Incode identity.");
             return errorResponse(ErrorMessage.VERIFICATION_NOT_COMPLETED);
         }
-        context.getAuthenticatorProperties().put(IncodeConstants.EXPECTED_IDENTITY, identityId);
+        context.getAuthenticatorProperties().put(Constants.EXPECTED_IDENTITY, identityId);
         return null;
     }
 
@@ -220,10 +220,10 @@ public class IncodeExecutor extends OpenIDConnectExecutor {
     protected Map<String, String> getAdditionalQueryParams(Map<String, String> authenticatorProperties) {
 
         Map<String, String> params = super.getAdditionalQueryParams(authenticatorProperties);
-        String identityId = authenticatorProperties.get(IncodeConstants.EXPECTED_IDENTITY);
+        String identityId = authenticatorProperties.get(Constants.EXPECTED_IDENTITY);
         if (identityId != null) {
-            params.put(IncodeConstants.PROMPT, IncodeConstants.PROMPT_LOGIN);
-            params.put(IncodeConstants.LOGIN_HINT, identityId);
+            params.put(Constants.PROMPT, Constants.PROMPT_LOGIN);
+            params.put(Constants.LOGIN_HINT, identityId);
         }
         return params;
     }
@@ -242,11 +242,11 @@ public class IncodeExecutor extends OpenIDConnectExecutor {
             LOG.error("Error reading the Incode identity linked to the user.", e);
             throw flowException(ErrorMessage.RESOLVING_ASSOCIATION);
         }
-        if (identityId == null || !identityId.equals(getClaim(idTokenClaims, IncodeConstants.IDENTITY_ID_CLAIM))) {
+        if (identityId == null || !identityId.equals(getClaim(idTokenClaims, Constants.IDENTITY_ID_CLAIM))) {
             throw flowException(ErrorMessage.LOGIN_IDENTITY_MISMATCH);
         }
-        String status = getClaim(idTokenClaims, IncodeConstants.STATUS_CLAIM);
-        if (status != null && !IncodeConstants.ACCEPTED_FACE_STATUSES.contains(status)) {
+        String status = getClaim(idTokenClaims, Constants.STATUS_CLAIM);
+        if (status != null && !Constants.ACCEPTED_FACE_STATUSES.contains(status)) {
             throw flowException(ErrorMessage.VERIFICATION_FAILED);
         }
     }
@@ -284,7 +284,7 @@ public class IncodeExecutor extends OpenIDConnectExecutor {
         if (FlowTypes.INVITED_USER_REGISTRATION.getType().equals(context.getFlowType())
                 || StringUtils.isNotBlank(context.getFlowUser().getClaims().get(USERNAME_CLAIM_URI))) {
             localClaims.remove(USERNAME_CLAIM_URI);
-            context.getProperties().remove(IncodeConstants.USERNAME_PATTERN_VALIDATION_SKIPPED);
+            context.getProperties().remove(Constants.USERNAME_PATTERN_VALIDATION_SKIPPED);
             UserCoreUtil.removeSkipUsernamePatternValidationThreadLocal();
         }
     }
