@@ -89,9 +89,12 @@ Create two confidential OpenID Connect clients in Incode:
 | Onboarding | Verifies the user at sign-up and invited-user registration. Its onboarding must create an identity, so that the ID token carries `identity_id` and `auth_overall_status`. | `https://<host>/accounts/register` |
 | Face authentication | Verifies the user at login and password recovery, with the user's `identity_id` as `login_hint`. | `https://<host>/commonauth` and `https://<host>/accounts/recovery` |
 
-For a tenant, add `/t/<tenant>` after the host. Custom portal URLs in branding change the `/accounts/...` values:
-self-registration uses the sign-up portal URL, and invited-user registration and password recovery use the recovery
-portal URL. See Incode's developer documentation for creating OpenID Connect clients.
+For a tenant, add `/t/<tenant>` after the host. These are the default portal URLs: self-registration and
+invited-user registration redirect to `/accounts/register`, and password recovery to `/accounts/recovery`. If custom
+portal URLs are configured in branding (**Self Signup** and **Recovery Portal**), self-registration redirects to the
+Self Signup URL, and invited-user registration and password recovery to the Recovery Portal URL. In that case register
+the Self Signup and Recovery Portal URLs on the onboarding client, and the Recovery Portal URL on the face
+authentication client. See Incode's developer documentation for creating OpenID Connect clients.
 
 ---
 
