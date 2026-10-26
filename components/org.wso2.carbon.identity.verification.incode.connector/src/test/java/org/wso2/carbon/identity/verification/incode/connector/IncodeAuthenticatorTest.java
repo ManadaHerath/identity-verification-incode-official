@@ -32,6 +32,8 @@ import org.wso2.carbon.identity.application.common.model.ClaimMapping;
 import org.wso2.carbon.identity.application.common.model.FederatedAuthenticatorConfig;
 import org.wso2.carbon.identity.application.common.model.IdentityProvider;
 import org.wso2.carbon.identity.user.profile.mgt.association.federation.FederatedAssociationManager;
+import org.wso2.carbon.identity.user.profile.mgt.association.federation.exception.FederatedAssociationManagerClientException;
+import org.wso2.carbon.identity.user.profile.mgt.association.federation.exception.FederatedAssociationManagerServerException;
 import org.wso2.carbon.identity.user.profile.mgt.association.federation.model.AssociatedIdentityProvider;
 import org.wso2.carbon.identity.user.profile.mgt.association.federation.model.FederatedAssociation;
 import org.wso2.carbon.identity.verification.incode.connector.constants.ErrorConstants.ErrorMessage;
@@ -131,6 +133,41 @@ public class IncodeAuthenticatorTest {
     }
 
     @Test
+    public void testUnknownUserIsNotLinked() throws Exception {
+
+        when(associationManager.getFederatedAssociationsOfUser(any()))
+                .thenThrow(new FederatedAssociationManagerClientException("Invalid user identifier provided."));
+        assertEquals(authenticator.addLinkedIdentityAsLoginHint(context(localUser(), false)),
+                ErrorMessage.IDENTITY_NOT_LINKED);
+    }
+
+    @Test
+    public void testAssociationLookupFailureIsAServerError() throws Exception {
+
+        when(associationManager.getFederatedAssociationsOfUser(any()))
+                .thenThrow(new FederatedAssociationManagerServerException("Database error."));
+        assertEquals(authenticator.addLinkedIdentityAsLoginHint(context(localUser(), false)),
+                ErrorMessage.RESOLVING_ASSOCIATION);
+    }
+
+    @Test
+    public void testTheSubjectStepMustComeBeforeTheIncodeStep() {
+
+        // Incode is step 1, the current step, and the password step after it is the subject step.
+        StepConfig incodeStep = new StepConfig();
+        StepConfig passwordStep = new StepConfig();
+        passwordStep.setSubjectIdentifierStep(true);
+        Map<Integer, StepConfig> steps = new HashMap<>();
+        steps.put(1, incodeStep);
+        steps.put(2, passwordStep);
+        AuthenticationContext context = context(localUser(), false);
+        context.getSequenceConfig().setStepMap(steps);
+        context.setCurrentStep(1);
+
+        assertEquals(authenticator.addLinkedIdentityAsLoginHint(context), ErrorMessage.INVALID_CONFIGURATION);
+    }
+
+    @Test
     public void testTheSubjectStepMustBeAnEarlierStepWithALocalUser() {
 
         assertEquals(authenticator.addLinkedIdentityAsLoginHint(context(localUser(), true)),
@@ -167,18 +204,19 @@ public class IncodeAuthenticatorTest {
     }
 
     @Test
-    public void testIncodeMustReturnTheLinkedIdentityWithAPassingStatus() {
+    public void testIncodeMustReturnTheLinkedIdentityAndAPassingStatus() {
 
         Map<ClaimMapping, String> claims = new HashMap<>();
         claims.put(ClaimMapping.build("identity_id", "identity_id", null, false), IDENTITY_ID);
+        assertEquals(IncodeAuthenticator.validateFaceAuthenticationResult(claims, IDENTITY_ID),
+                ErrorMessage.VERIFICATION_FAILED, "A token without a status fails the step.");
+
+        claims.put(ClaimMapping.build("auth_overall_status", "auth_overall_status", null, false), "PASS");
         assertNull(IncodeAuthenticator.validateFaceAuthenticationResult(claims, IDENTITY_ID));
         assertEquals(IncodeAuthenticator.validateFaceAuthenticationResult(claims, "another-identity"),
                 ErrorMessage.LOGIN_IDENTITY_MISMATCH);
         assertEquals(IncodeAuthenticator.validateFaceAuthenticationResult(claims, null),
                 ErrorMessage.LOGIN_IDENTITY_MISMATCH);
-
-        claims.put(ClaimMapping.build("auth_overall_status", "auth_overall_status", null, false), "PASS");
-        assertNull(IncodeAuthenticator.validateFaceAuthenticationResult(claims, IDENTITY_ID));
         claims.put(ClaimMapping.build("auth_overall_status", "auth_overall_status", null, false), "FAIL");
         assertEquals(IncodeAuthenticator.validateFaceAuthenticationResult(claims, IDENTITY_ID),
                 ErrorMessage.VERIFICATION_FAILED);

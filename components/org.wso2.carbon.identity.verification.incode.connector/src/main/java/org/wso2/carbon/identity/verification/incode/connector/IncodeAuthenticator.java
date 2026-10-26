@@ -29,14 +29,10 @@ import org.wso2.carbon.identity.application.authentication.framework.util.Framew
 import org.wso2.carbon.identity.application.authentication.framework.util.FrameworkUtils;
 import org.wso2.carbon.identity.application.authenticator.oidc.OpenIDConnectAuthenticator;
 import org.wso2.carbon.identity.application.common.model.ClaimMapping;
-import org.wso2.carbon.identity.application.common.model.FederatedAuthenticatorConfig;
-import org.wso2.carbon.identity.application.common.model.IdentityProvider;
-import org.wso2.carbon.identity.application.common.model.User;
 import org.wso2.carbon.identity.user.profile.mgt.association.federation.exception.FederatedAssociationManagerException;
-import org.wso2.carbon.identity.user.profile.mgt.association.federation.model.FederatedAssociation;
 import org.wso2.carbon.identity.verification.incode.connector.constants.Constants;
 import org.wso2.carbon.identity.verification.incode.connector.constants.ErrorConstants.ErrorMessage;
-import org.wso2.carbon.identity.verification.incode.connector.internal.IncodeConnectorDataHolder;
+import org.wso2.carbon.identity.verification.incode.connector.util.IncodeUtils;
 import org.wso2.carbon.idp.mgt.IdentityProviderManagementException;
 
 import java.io.IOException;
@@ -96,7 +92,7 @@ public class IncodeAuthenticator extends OpenIDConnectAuthenticator {
                                                  AuthenticationContext context)
             throws AuthenticationFailedException {
 
-        Object expectedIdentity = context.getProperty(Constants.EXPECTED_IDENTITY);
+        String expectedIdentity = (String) context.getProperty(Constants.EXPECTED_IDENTITY);
         context.removeProperty(Constants.EXPECTED_IDENTITY);
         String oauthError = request.getParameter(OAUTH2_ERROR);
         if (StringUtils.isNotBlank(oauthError)) {
@@ -112,42 +108,41 @@ public class IncodeAuthenticator extends OpenIDConnectAuthenticator {
     }
 
     /**
-     * Incode must return the identity sent as login_hint, and a passing status when it sends one.
+     * Incode must return the identity sent as login_hint and a passing status.
      *
      * @return the error that fails the step, or null.
      */
-    static ErrorMessage validateFaceAuthenticationResult(Map<ClaimMapping, String> claims, Object expectedIdentity) {
+    static ErrorMessage validateFaceAuthenticationResult(Map<ClaimMapping, String> claims, String expectedIdentity) {
 
         if (expectedIdentity == null
                 || !expectedIdentity.equals(getRemoteClaim(claims, Constants.IDENTITY_ID_CLAIM))) {
             return ErrorMessage.LOGIN_IDENTITY_MISMATCH;
         }
         String status = getRemoteClaim(claims, Constants.STATUS_CLAIM);
-        return status == null || Constants.ACCEPTED_FACE_STATUSES.contains(status) ? null :
+        return status != null && Constants.ACCEPTED_FACE_STATUSES.contains(status) ? null :
                 ErrorMessage.VERIFICATION_FAILED;
     }
 
     /**
      * Finds the user of the subject identifier step, which must be an earlier step, and adds the Incode identity
-     * linked to that user as login_hint.
+     * linked to that user as login_hint. The step map is keyed by step order.
      *
      * @return the error that stops the request, or null.
      */
     ErrorMessage addLinkedIdentityAsLoginHint(AuthenticationContext context) {
 
-        Map<Integer, StepConfig> steps = context.getSequenceConfig().getStepMap();
-        StepConfig subjectStep = steps.values().stream().filter(StepConfig::isSubjectIdentifierStep).findFirst()
-                .orElse(null);
-        if (subjectStep == null || subjectStep == steps.get(context.getCurrentStep())) {
+        Map.Entry<Integer, StepConfig> subjectStep = context.getSequenceConfig().getStepMap().entrySet().stream()
+                .filter(step -> step.getValue().isSubjectIdentifierStep()).findFirst().orElse(null);
+        if (subjectStep == null || subjectStep.getKey() >= context.getCurrentStep()) {
             return ErrorMessage.INVALID_CONFIGURATION;
         }
-        AuthenticatedUser user = subjectStep.getAuthenticatedUser();
+        AuthenticatedUser user = subjectStep.getValue().getAuthenticatedUser();
         if (user == null || user.isFederatedUser()) {
             return ErrorMessage.NO_LOCAL_USER;
         }
         String identityId;
         try {
-            identityId = getLinkedIdentity(user);
+            identityId = IncodeUtils.getLinkedIdentity(user);
         } catch (FederatedAssociationManagerException | IdentityProviderManagementException e) {
             LOG.error("Error reading the Incode identity linked to the user.", e);
             return ErrorMessage.RESOLVING_ASSOCIATION;
@@ -183,25 +178,6 @@ public class IncodeAuthenticator extends OpenIDConnectAuthenticator {
         return String.join("&", params);
     }
 
-    /**
-     * The user's link to an identity made by an Incode connection. Sign-up links the user through the onboarding
-     * connection, so the link is found by the connection's authenticator, not by this connection's name.
-     */
-    static String getLinkedIdentity(User user)
-            throws FederatedAssociationManagerException, IdentityProviderManagementException {
-
-        for (FederatedAssociation association :
-                IncodeConnectorDataHolder.getFederatedAssociationManager().getFederatedAssociationsOfUser(user)) {
-            IdentityProvider idp = IncodeConnectorDataHolder.getIdpManager()
-                    .getIdPByName(association.getIdp().getName(), user.getTenantDomain());
-            FederatedAuthenticatorConfig authenticator = idp == null ? null : idp.getDefaultAuthenticatorConfig();
-            if (authenticator != null && Constants.AUTHENTICATOR_NAME.equals(authenticator.getName())) {
-                return association.getFederatedUserId();
-            }
-        }
-        return null;
-    }
-
     private static String getRemoteClaim(Map<ClaimMapping, String> claims, String claimName) {
 
         return claims.entrySet().stream()
@@ -233,11 +209,7 @@ public class IncodeAuthenticator extends OpenIDConnectAuthenticator {
 
     private static void setErrorInformation(AuthenticationContext context, ErrorMessage error) {
 
-        if (error.isClientError()) {
-            LOG.info(error);
-        } else {
-            LOG.error(error);
-        }
+        IncodeUtils.log(LOG, error);
         context.setProperty(FrameworkConstants.AUTH_ERROR_CODE, error.getCode());
         context.setProperty(FrameworkConstants.AUTH_ERROR_MSG, error.getMessage());
     }

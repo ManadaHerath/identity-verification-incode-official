@@ -50,6 +50,12 @@
                 <groupId>org.wso2.carbon.identity.outbound.auth.oidc</groupId>
                 <artifactId>org.wso2.carbon.identity.application.authenticator.oidc</artifactId>
                 <version>${identity.outbound.auth.oidc.version}</version>
+                <exclusions>
+                    <exclusion>
+                        <groupId>org.wso2.carbon.identity.framework</groupId>
+                        <artifactId>org.wso2.carbon.identity.entitlement</artifactId>
+                    </exclusion>
+                </exclusions>
             </dependency>
             <dependency>
                 <groupId>org.wso2.carbon.identity.framework</groupId>
@@ -237,7 +243,7 @@
     <properties>
         <commons-lang.wso2.version>2.6.0.wso2v1</commons-lang.wso2.version>
         <commons-logging.version>1.2</commons-logging.version>
-        <carbon.identity.framework.version>7.11.189</carbon.identity.framework.version>
+        <carbon.identity.framework.version>7.11.243</carbon.identity.framework.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <org.eclipse.osgi.services.version>3.3.100.v20130513-1956</org.eclipse.osgi.services.version>
         <org.eclipse.osgi.version>3.9.1.v20130814-1242</org.eclipse.osgi.version>

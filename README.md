@@ -36,7 +36,11 @@ association and trusts only that link.
    it to Incode as `login_hint` with `prompt=login`, and accepts the step only if Incode returns the same
    `identity_id`. Password recovery changes neither the profile nor the link.
 
-Users cannot create or change links. The profile attributes the connection fills in are for display only.
+Users cannot create or change links through self-service. A user can remove the link from My Account; Incode login
+and password recovery then fail for that account, and the identity can be used to register again. An administrator can
+add the link back with `POST /api/users/v1/{user-id}/federated-associations` (the onboarding connection and the
+Incode identity ID), unless another account has registered with that identity since. The profile attributes the
+connection fills in are for display only.
 
 ---
 
@@ -127,6 +131,19 @@ authentication client. See Incode's developer documentation for creating OpenID 
 
 ---
 
+## Sub-organizations
+
+- Sub-organizations inherit the root organization's flows, including the Incode steps. Share both Incode connections
+  with the sub-organizations that use them (connection sharing must be enabled on the server:
+  `[connection_sharing.idp]` `enable = true` in `deployment.toml`); otherwise the step cannot load its connection.
+- For users of a sub-organization, add the Incode login step to the login flow of the shared application inside the
+  sub-organization. Their login runs on that flow, so an Incode step in the root application's login flow does not
+  apply to them.
+- Accounts are linked through the sub-organization's copy of the shared connection, and the duplicate check applies
+  per organization.
+
+---
+
 ## Runtime behaviour
 
 **Sign-up**
@@ -136,7 +153,7 @@ authentication client. See Incode's developer documentation for creating OpenID 
 | Status `PASS`, `OK` or `MANUAL_OK`, and a new `identity_id` | Account created and linked to `identity_id` |
 | Status `MANUAL`, `MANUAL_PENDING` or `WARN` | Refused, pending review (`INCODE-60004`) |
 | Any other status | Refused (`INCODE-60003`) |
-| `identity_id` already linked on the connection | Refused before the account is created (`INCODE-60009`) |
+| `identity_id` already linked through an Incode connection of the organization | Refused before the account is created (`INCODE-60009`) |
 | User cancelled at Incode | Refused (`INCODE-60002`) |
 
 **Invited-user registration**: the same results as sign-up; on success the invited account is linked to
@@ -146,25 +163,27 @@ authentication client. See Incode's developer documentation for creating OpenID 
 
 | Situation | Outcome |
 |---|---|
-| Returned `identity_id` matches the link, status `PASS` or `OK` (when present) | Step succeeds; the password can be reset |
-| The account has no Incode link | Refused with the generic `INCODE-60005`, before Incode is called |
-| Another identity returned, or a failing status | Refused (`INCODE-60008`, `60003`) |
+| Returned `identity_id` matches the link, status `PASS` or `OK` | Step succeeds; the password can be reset |
+| The account has no Incode link, or the username does not exist | Refused with the generic `INCODE-60005`, before Incode is called |
+| Another identity returned, or a failing or missing status | Refused (`INCODE-60008`, `60003`) |
 | User cancelled at Incode | Refused (`INCODE-60002`) |
 
 **Login**
 
 | Situation | Outcome |
 |---|---|
-| Returned `identity_id` matches the link, status `PASS` or `OK` (when present) | Step succeeds |
-| No link, no local user from the subject step, or the Incode step is the subject step | WSO2 error page (`INCODE-60001`, `60010`, `65001`) |
-| Cancelled, another identity returned, or a failing status | The application receives `INCODE-60002`, `60008` or `60003` with a user-friendly description, or the application's adaptive script handles the failure in `onFail` |
+| Returned `identity_id` matches the link, status `PASS` or `OK` | Step succeeds |
+| No link, no local user from the subject step, or the subject step is not before the Incode step | WSO2 error page (`INCODE-60001`, `60010`, `65001`) |
+| The link could not be read | WSO2 error page (`INCODE-65010`) |
+| Cancelled, another identity returned, or a failing or missing status | The application receives `INCODE-60002`, `60008` or `60003` with a user-friendly description, or the application's adaptive script handles the failure in `onFail` |
 
 ---
 
 ## Error codes
 
 Client errors are `INCODE-60xxx`, server and configuration errors `INCODE-65xxx`. Portals translate the keys
-`incode.identity.verification.<key>.message` and `.description`; errors without a key show a generic message.
+`incode.identity.verification.<key>.message` and `.description` from their resource bundles (wso2/identity-apps);
+errors without a key show their English message.
 
 | Code | Meaning | i18n key |
 |---|---|---|
@@ -172,7 +191,7 @@ Client errors are `INCODE-60xxx`, server and configuration errors `INCODE-65xxx`
 | 60002 | Verification cancelled | `cancelled` |
 | 60003 | Verification failed | `failed` |
 | 60004 | Verification needs a manual review | `pending.review` |
-| 60005 | The verification could not be completed: Incode returned another error, or (password recovery) the account has no Incode link | `not.completed` |
+| 60005 | The verification could not be completed: Incode returned another error, or (password recovery) the account has no Incode link or does not exist | `not.completed` |
 | 60007 | The verification response is invalid or expired | `session.expired` |
 | 60008 | The verified identity does not match the account | `login.identity.mismatch` |
 | 60009 | The identity is already registered | `already.linked` |
@@ -198,8 +217,10 @@ Client errors are `INCODE-60xxx`, server and configuration errors `INCODE-65xxx`
 ## Limitations
 
 - App-native (API-based) authentication is not supported by the login step.
-- The duplicate check covers the onboarding connection that runs the step; use one onboarding connection per
-  organization.
+- The duplicate check covers every Incode connection of the organization that runs the flow. The same identity can
+  register once in each organization. It is a check before the account is created, so two sign-ups with the same
+  identity at the same moment can both pass it; the link table accepts only one, and the other account is created
+  without a link.
 - In password recovery, an account without an Incode link is refused before Incode is called, while a linked account
   is redirected to Incode, so a user who passes the earlier step can tell whether the account is linked.
 
@@ -215,3 +236,4 @@ Client errors are `INCODE-60xxx`, server and configuration errors `INCODE-65xxx`
 | Login fails with `INCODE-60001` | The user signed up without the Incode step, or the link was removed |
 | Incode rejects the `login_hint` | The face authentication client is not configured for the identity id as login hint |
 | Redirect URI mismatch at Incode | The redirect URI registered on the Incode client differs from the one on the connection |
+| The Incode step fails in a sub-organization with `FE-65011` (error loading the identity provider configurations) | The Incode connection is not shared with the sub-organization |

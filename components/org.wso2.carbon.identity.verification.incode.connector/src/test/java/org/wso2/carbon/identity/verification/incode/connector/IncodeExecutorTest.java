@@ -26,6 +26,7 @@ import org.wso2.carbon.identity.application.authentication.framework.config.buil
 import org.wso2.carbon.identity.application.authentication.framework.config.model.ExternalIdPConfig;
 import org.wso2.carbon.identity.application.authentication.framework.store.UserSessionStore;
 import org.wso2.carbon.identity.application.authentication.framework.util.FrameworkUtils;
+import org.wso2.carbon.identity.application.authenticator.oidc.OpenIDConnectExecutor;
 import org.wso2.carbon.identity.application.common.model.ClaimMapping;
 import org.wso2.carbon.identity.application.common.model.FederatedAuthenticatorConfig;
 import org.wso2.carbon.identity.application.common.model.IdentityProvider;
@@ -40,11 +41,15 @@ import org.wso2.carbon.identity.flow.execution.engine.model.FlowExecutionContext
 import org.wso2.carbon.identity.flow.execution.engine.model.FlowUser;
 import org.wso2.carbon.identity.flow.mgt.Constants.FlowTypes;
 import org.wso2.carbon.identity.user.profile.mgt.association.federation.FederatedAssociationManager;
+import org.wso2.carbon.identity.user.profile.mgt.association.federation.exception.FederatedAssociationManagerClientException;
 import org.wso2.carbon.identity.user.profile.mgt.association.federation.model.AssociatedIdentityProvider;
 import org.wso2.carbon.identity.user.profile.mgt.association.federation.model.FederatedAssociation;
+import org.wso2.carbon.identity.verification.incode.connector.constants.Constants;
 import org.wso2.carbon.identity.verification.incode.connector.internal.IncodeConnectorDataHolder;
 import org.wso2.carbon.idp.mgt.IdpManager;
 
+import java.lang.reflect.Field;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.HashMap;
@@ -56,6 +61,8 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertFalse;
@@ -134,6 +141,15 @@ public class IncodeExecutorTest {
     }
 
     @Test
+    public void testCallbackNeedsACodeAndAState() {
+
+        assertEquals(executor.execute(callbackContext(" ", "state-sent")).getErrorCode(), "INCODE-60005");
+        assertEquals(executor.execute(callbackContext(null, "state-sent")).getErrorCode(), "INCODE-60005");
+        assertEquals(executor.execute(callbackContext("authorization-code", " ")).getErrorCode(), "INCODE-60007");
+        assertEquals(executor.execute(callbackContext("authorization-code", null)).getErrorCode(), "INCODE-60007");
+    }
+
+    @Test
     public void testCallbackKeepsIncodeErrorCodes() throws Exception {
 
         FlowExecutionContext context = callbackContext();
@@ -187,6 +203,24 @@ public class IncodeExecutorTest {
         assertOnboardingError(context, idToken(IDENTITY_ID, null), "INCODE-65009", false);
 
         when(associationManager.getUserForFederatedAssociation(TENANT, CONNECTION, IDENTITY_ID)).thenReturn("bob");
+        assertOnboardingError(context, idToken(IDENTITY_ID, "PASS"), "INCODE-60009", true);
+    }
+
+    @Test
+    public void testIdentityLinkedThroughAnotherIncodeConnectionCannotSignUp() throws Exception {
+
+        when(idpManager.getIdPs(TENANT)).thenReturn(Arrays.asList(namedConnection(CONNECTION),
+                namedConnection("Google"), namedConnection("Incode Onboarding 2")));
+        when(idpManager.getIdPByName("Google", TENANT)).thenReturn(connection("GoogleOIDCAuthenticator"));
+        when(idpManager.getIdPByName("Incode Onboarding 2", TENANT)).thenReturn(connection("IncodeAuthenticator"));
+        FlowExecutionContext context = context(Collections.emptyMap());
+
+        when(associationManager.getUserForFederatedAssociation(TENANT, "Google", IDENTITY_ID)).thenReturn("carol");
+        assertEquals(executor.validateOnboardingResult(context, idToken(IDENTITY_ID, "PASS")), IDENTITY_ID,
+                "A link made by a non-Incode connection does not count.");
+
+        when(associationManager.getUserForFederatedAssociation(TENANT, "Incode Onboarding 2", IDENTITY_ID))
+                .thenReturn("bob");
         assertOnboardingError(context, idToken(IDENTITY_ID, "PASS"), "INCODE-60009", true);
     }
 
@@ -260,6 +294,29 @@ public class IncodeExecutorTest {
     }
 
     @Test
+    public void testPasswordRecoveryDoesNotRevealAnUnknownUser() throws Exception {
+
+        when(associationManager.getFederatedAssociationsOfUser(any()))
+                .thenThrow(new FederatedAssociationManagerClientException("Invalid user identifier provided."));
+        ExecutorResponse response = executor.execute(recoveryContext());
+
+        assertEquals(response.getResult(), "USER_ERROR");
+        assertEquals(response.getErrorCode(), "INCODE-60005");
+        assertEquals(response.getErrorMessage(), "{{incode.identity.verification.not.completed.message}}");
+    }
+
+    @Test
+    public void testPasswordRecoveryNeedsAnIdentifiedUser() throws Exception {
+
+        FlowExecutionContext context = recoveryContext();
+        context.setFlowUser(mock(FlowUser.class));
+        ExecutorResponse response = executor.execute(context);
+
+        assertEquals(response.getErrorCode(), "INCODE-60005");
+        verify(associationManager, never()).getFederatedAssociationsOfUser(any());
+    }
+
+    @Test
     public void testPasswordRecoveryAcceptsOnlyTheLinkedIdentity() throws Exception {
 
         linkUserTo(IDENTITY_ID);
@@ -270,6 +327,7 @@ public class IncodeExecutorTest {
         assertTrue(context.getFlowUser().getFederatedAssociations().isEmpty(), "Recovery leaves the link unchanged.");
         assertRecoveryError(context, idToken("another-identity-id", "PASS"), "INCODE-60008");
         assertRecoveryError(context, idToken(IDENTITY_ID, "FAIL"), "INCODE-60003");
+        assertRecoveryError(context, idToken(IDENTITY_ID, null), "INCODE-60003");
     }
 
     @Test
@@ -286,6 +344,14 @@ public class IncodeExecutorTest {
         executor.retainExistingUsername(context, claims);
         assertFalse(claims.containsKey(USERNAME_CLAIM));
         assertFalse(context.getProperties().containsKey("isUsernamePatternValidationSkipped"));
+    }
+
+    @Test
+    public void testUsernamePatternPropertyMatchesTheOpenIdConnectExecutor() throws Exception {
+
+        Field property = OpenIDConnectExecutor.class.getDeclaredField("USERNAME_PATTERN_VALIDATION_SKIPPED");
+        property.setAccessible(true);
+        assertEquals(property.get(null), Constants.USERNAME_PATTERN_VALIDATION_SKIPPED);
     }
 
     private void assertRecoveryError(FlowExecutionContext context, Map<String, Object> idToken, String code) {
@@ -310,11 +376,26 @@ public class IncodeExecutorTest {
         when(association.getFederatedUserId()).thenReturn(identityId);
         when(associationManager.getFederatedAssociationsOfUser(any()))
                 .thenReturn(new FederatedAssociation[]{association});
+        when(idpManager.getIdPByName(CONNECTION, TENANT)).thenReturn(connection("IncodeAuthenticator"));
+    }
+
+    private static IdentityProvider connection(String authenticatorName) {
+
         FederatedAuthenticatorConfig authenticator = new FederatedAuthenticatorConfig();
-        authenticator.setName("IncodeAuthenticator");
+        authenticator.setName(authenticatorName);
         IdentityProvider connection = new IdentityProvider();
         connection.setDefaultAuthenticatorConfig(authenticator);
-        when(idpManager.getIdPByName(CONNECTION, TENANT)).thenReturn(connection);
+        return connection;
+    }
+
+    /**
+     * A connection as the connection list returns it: name only.
+     */
+    private static IdentityProvider namedConnection(String name) {
+
+        IdentityProvider connection = new IdentityProvider();
+        connection.setIdentityProviderName(name);
+        return connection;
     }
 
     /**
@@ -411,7 +492,22 @@ public class IncodeExecutorTest {
 
     private static FlowExecutionContext callbackContext() {
 
-        FlowExecutionContext context = context(callback("state-sent"));
+        return callbackContext("authorization-code", "state-sent");
+    }
+
+    /**
+     * A callback with the given code and state, null leaving the input out, after the step sent state-sent.
+     */
+    private static FlowExecutionContext callbackContext(String code, String state) {
+
+        Map<String, String> inputs = new HashMap<>();
+        if (code != null) {
+            inputs.put("code", code);
+        }
+        if (state != null) {
+            inputs.put("state", state);
+        }
+        FlowExecutionContext context = context(inputs);
         context.setProperty("state", "state-sent");
         return context;
     }

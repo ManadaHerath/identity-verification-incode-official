@@ -35,7 +35,7 @@ import org.wso2.carbon.identity.user.profile.mgt.association.federation.exceptio
 import org.wso2.carbon.identity.verification.incode.connector.constants.Constants;
 import org.wso2.carbon.identity.verification.incode.connector.constants.ErrorConstants;
 import org.wso2.carbon.identity.verification.incode.connector.constants.ErrorConstants.ErrorMessage;
-import org.wso2.carbon.identity.verification.incode.connector.internal.IncodeConnectorDataHolder;
+import org.wso2.carbon.identity.verification.incode.connector.util.IncodeUtils;
 import org.wso2.carbon.idp.mgt.IdentityProviderManagementException;
 import org.wso2.carbon.user.core.util.UserCoreUtil;
 
@@ -96,7 +96,8 @@ public class IncodeExecutor extends OpenIDConnectExecutor {
 
     /**
      * Handles the Incode callback here, so that an Incode error ends the step instead of starting a new redirect and
-     * error codes reach the portal. The first call, which redirects to Incode, is the stock executor's.
+     * error codes reach the portal. The first call, which has neither a code nor a state and redirects to Incode, is
+     * the stock executor's; a callback must carry both.
      */
     @Override
     public ExecutorResponse execute(FlowExecutionContext context) {
@@ -110,13 +111,16 @@ public class IncodeExecutor extends OpenIDConnectExecutor {
         }
         String code = inputs.get(OAUTH2_GRANT_TYPE_CODE);
         String state = inputs.get(OAUTH2_PARAM_STATE);
-        if (code == null || state == null) {
+        if (code == null && state == null) {
             ExecutorResponse error = isPasswordRecovery(context) ? addLinkedIdentityAsLoginHint(context) : null;
             return error != null ? error : super.execute(context);
         }
         Object expectedState = context.getProperty(OAUTH2_PARAM_STATE);
-        if (expectedState == null || !state.equals(expectedState.toString())) {
+        if (StringUtils.isBlank(state) || expectedState == null || !state.equals(expectedState.toString())) {
             return buildErrorResponse(ErrorMessage.INVALID_STATE);
+        }
+        if (StringUtils.isBlank(code)) {
+            return buildErrorResponse(ErrorMessage.VERIFICATION_NOT_COMPLETED);
         }
         try {
             ExecutorResponse response = new ExecutorResponse(STATUS_COMPLETE);
@@ -163,8 +167,9 @@ public class IncodeExecutor extends OpenIDConnectExecutor {
     }
 
     /**
-     * Checks the Incode result and refuses an identity that is already registered. User provisioning would otherwise
-     * create the user before failing on the link.
+     * Checks the Incode result and refuses an identity that is already registered through any Incode connection of
+     * the organization, the connections whose links login accepts. User provisioning would otherwise create the user
+     * before failing on the link.
      *
      * @return the Incode identity.
      */
@@ -180,27 +185,36 @@ public class IncodeExecutor extends OpenIDConnectExecutor {
             throw handleFlowEngineException(Constants.PENDING_REVIEW_STATUSES.contains(status) ?
                     ErrorMessage.VERIFICATION_PENDING_REVIEW : ErrorMessage.VERIFICATION_FAILED);
         }
+        boolean linked;
         try {
-            if (IncodeConnectorDataHolder.getFederatedAssociationManager().getUserForFederatedAssociation(
-                    context.getTenantDomain(), context.getExternalIdPConfig().getIdPName(), identityId) != null) {
-                throw handleFlowEngineException(ErrorMessage.IDENTITY_ALREADY_LINKED);
-            }
-        } catch (FederatedAssociationManagerException e) {
+            linked = IncodeUtils.isIdentityLinked(identityId, context.getExternalIdPConfig().getIdPName(),
+                    context.getTenantDomain());
+        } catch (FederatedAssociationManagerException | IdentityProviderManagementException e) {
             LOG.error("Error checking whether the Incode identity is already registered.", e);
             throw handleFlowEngineException(ErrorMessage.RESOLVING_ASSOCIATION);
+        }
+        if (linked) {
+            throw handleFlowEngineException(ErrorMessage.IDENTITY_ALREADY_LINKED);
         }
         return identityId;
     }
 
     /**
      * Password recovery re-verifies the account owner: sends the Incode identity linked to the user as login_hint
-     * with prompt=login. An account without a link gets the same error as a failed verification, so the step does
-     * not reveal whether the account is linked.
+     * with prompt=login. An account without a link, including a username that does not exist, gets the generic
+     * not-completed error before Incode is called.
      *
      * @return the error that stops the step, or null.
      */
     ExecutorResponse addLinkedIdentityAsLoginHint(FlowExecutionContext context) {
 
+        if (StringUtils.isBlank(context.getFlowUser().getUsername())) {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Password recovery cannot verify the user: no user is identified yet. Place the Incode "
+                        + "step after the step that identifies the user.");
+            }
+            return buildErrorResponse(ErrorMessage.VERIFICATION_NOT_COMPLETED);
+        }
         String identityId;
         try {
             identityId = getLinkedIdentity(context);
@@ -209,7 +223,8 @@ public class IncodeExecutor extends OpenIDConnectExecutor {
             return buildErrorResponse(ErrorMessage.RESOLVING_ASSOCIATION);
         }
         if (identityId == null) {
-            LOG.info("Password recovery cannot verify the user: the account is not linked to an Incode identity.");
+            LOG.info("Password recovery cannot verify the user: the account does not exist or is not linked to an "
+                    + "Incode identity.");
             return buildErrorResponse(ErrorMessage.VERIFICATION_NOT_COMPLETED);
         }
         context.getAuthenticatorProperties().put(Constants.EXPECTED_IDENTITY, identityId);
@@ -229,8 +244,7 @@ public class IncodeExecutor extends OpenIDConnectExecutor {
     }
 
     /**
-     * In password recovery Incode must return the identity linked to the user, and a passing status when it sends
-     * one.
+     * In password recovery Incode must return the identity linked to the user and a passing status.
      */
     void validateFaceAuthenticationResult(FlowExecutionContext context, Map<String, Object> idTokenClaims)
             throws FlowEngineException {
@@ -246,7 +260,7 @@ public class IncodeExecutor extends OpenIDConnectExecutor {
             throw handleFlowEngineException(ErrorMessage.LOGIN_IDENTITY_MISMATCH);
         }
         String status = getClaim(idTokenClaims, Constants.STATUS_CLAIM);
-        if (status != null && !Constants.ACCEPTED_FACE_STATUSES.contains(status)) {
+        if (status == null || !Constants.ACCEPTED_FACE_STATUSES.contains(status)) {
             throw handleFlowEngineException(ErrorMessage.VERIFICATION_FAILED);
         }
     }
@@ -267,7 +281,7 @@ public class IncodeExecutor extends OpenIDConnectExecutor {
         user.setUserStoreDomain(StringUtils.isNotBlank(userStoreDomain) ? userStoreDomain :
                 UserCoreUtil.extractDomainFromName(username));
         user.setUserName(UserCoreUtil.removeDomainFromName(username));
-        return IncodeAuthenticator.getLinkedIdentity(user);
+        return IncodeUtils.getLinkedIdentity(user);
     }
 
     private static boolean isPasswordRecovery(FlowExecutionContext context) {
@@ -297,7 +311,7 @@ public class IncodeExecutor extends OpenIDConnectExecutor {
 
     private static FlowEngineException handleFlowEngineException(ErrorMessage error) {
 
-        log(error);
+        IncodeUtils.log(LOG, error);
         return error.isClientError() ?
                 new FlowEngineClientException(error.getCode(), error.getUserMessageToken(),
                         error.getUserDescriptionToken()) :
@@ -307,7 +321,7 @@ public class IncodeExecutor extends OpenIDConnectExecutor {
 
     private static ExecutorResponse buildErrorResponse(ErrorMessage error) {
 
-        log(error);
+        IncodeUtils.log(LOG, error);
         return buildErrorResponse(error.isClientError() ? STATUS_USER_ERROR : STATUS_ERROR, error.getCode(),
                 error.getUserMessageToken(), error.getUserDescriptionToken());
     }
@@ -320,14 +334,5 @@ public class IncodeExecutor extends OpenIDConnectExecutor {
         response.setErrorMessage(message);
         response.setErrorDescription(description);
         return response;
-    }
-
-    private static void log(ErrorMessage error) {
-
-        if (error.isClientError()) {
-            LOG.info(error);
-        } else {
-            LOG.error(error);
-        }
     }
 }

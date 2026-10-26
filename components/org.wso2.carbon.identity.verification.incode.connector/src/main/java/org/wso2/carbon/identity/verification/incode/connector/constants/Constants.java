@@ -47,6 +47,7 @@ public final class Constants {
     public static final String PROMPT_LOGIN = "login";
     public static final String EXPECTED_IDENTITY = "incodeExpectedIdentity";
     public static final String RETRY_PAGE_STATUS_KEY = "unable.to.proceed";
+    // OpenIDConnectExecutor keeps this property name private; IncodeExecutorTest fails if the two differ.
     public static final String USERNAME_PATTERN_VALIDATION_SKIPPED = "isUsernamePatternValidationSkipped";
 
     private Constants() {
