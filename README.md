@@ -180,7 +180,11 @@ authentication client. See Incode's developer documentation for creating OpenID 
 | Returned `identity_id` matches the link, status `PASS` or `OK` | Step succeeds |
 | No link, no local user from the subject step, or the subject step is not before the Incode step | WSO2 error page (`INCODE-60001`, `60010`, `65001`) |
 | The link could not be read | WSO2 error page (`INCODE-65010`) |
-| Cancelled or not verified at Incode, another identity returned, or a failing or missing status | The application receives `INCODE-60002`, `60008` or `60003` with a user-friendly description, or the application's adaptive script handles the failure in `onFail` |
+| Cancelled or not verified at Incode, another Incode error, another identity returned, or a failing or missing status | The application receives `INCODE-60002`, `60005`, `60008` or `60003` with a user-friendly description, or the application's adaptive script handles the failure in `onFail` |
+| The token request to Incode fails | The application receives the standard `login_required` error |
+
+The application receives these errors at its redirect URL as a standard OAuth 2.0 error response: the code in
+`error` and a message that can be shown to the user in `error_description`.
 
 ---
 
