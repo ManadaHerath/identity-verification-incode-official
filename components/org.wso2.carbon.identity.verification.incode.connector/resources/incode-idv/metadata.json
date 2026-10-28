@@ -101,11 +101,7 @@
                     "paragraphs": [
                         "In the Incode Dashboard, create an OIDC client for <strong>onboarding</strong> and another for <strong>face authentication</strong>, and create one connection for each. Add the redirect URIs below to the matching client.",
                         "Before you create the connection, add the attributes <Code class=\"inline-code\">incodeIdentityId</Code> (OpenID Connect attribute <Code class=\"inline-code\">identity_id</Code>), <Code class=\"inline-code\">incodeInterviewId</Code> and <Code class=\"inline-code\">incodeOnboardingStatus</Code>."
-                    ],
-                    "link": {
-                        "text": "See the Incode identity verification guide.",
-                        "url": "https://wso2.com/asgardeo/docs/guides/identity-verification/add-identity-verification-with-incode/"
-                    }
+                    ]
                 },
                 "fields": [
                     {
